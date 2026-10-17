@@ -831,8 +831,7 @@ private fun ServerMapView(
                 // The service may block generic library/package-only User-Agent strings.
                 Configuration.getInstance().userAgentValue =
                     "SpeedTester/4.7 (Android; https://github.com/N2K02/SpeedTester)"
-                // Keep downloader failures visible in logcat while diagnosing blank tiles.
-                Configuration.getInstance().debugMapTileDownloader = true
+                // Tile request diagnostics are emitted by osmdroid's provider logger.
                 MapView(viewContext).apply {
                     setTileSource(openStreetMapTileSource())
                     setMultiTouchControls(true)
