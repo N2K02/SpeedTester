@@ -236,7 +236,7 @@ private fun SpeedTesterApp(context: Context) {
                     item { Text("Data usage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     item { Text("A full test transfers several megabytes. Tests run only on demand; no background speed testing.", color = Muted) }
                     item { Text("Updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                    item { Text("Current version " + BuildConfig.VERSION_NAME + ". Tap the download icon above to check GitHub Releases.", color = Muted) }
+                    item { Text("Current version " + BuildConfig.VERSION_NAME + ". Open the Updates tab to check GitHub Releases.", color = Muted) }
                     if (updateMessage.isNotBlank()) item { Text(updateMessage, color = Teal) }
                 }
                 else -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
