@@ -780,8 +780,8 @@ private object ServerGeoLocator {
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
 /**
- * Native Canvas-based OpenStreetMap view. This intentionally avoids MapLibre's native
- * OpenGL renderer, which was crashing on some Android 17 devices.
+ * Native OpenStreetMap view. Controls are Compose overlays; markers are only rebuilt
+ * when the server data or distance origin changes, not on every map gesture/recomposition.
  */
 @Composable
 private fun ServerMapView(
@@ -792,49 +792,136 @@ private fun ServerMapView(
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapView by remember { mutableStateOf<MapView?>(null) }
-
-    AndroidView(
-        modifier = modifier,
-        factory = { viewContext ->
-            Configuration.getInstance().userAgentValue = viewContext.packageName
-            MapView(viewContext).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
-                setMultiTouchControls(true)
-                controller.setZoom(7.0)
-                controller.setCenter(GeoPoint(originLat, originLon))
-                mapView = this
-            }
-        },
-        update = { map ->
-            map.overlays.clear()
-            val origin = GeoPoint(originLat, originLon)
-            val originMarker = Marker(map).apply {
-                position = origin
-                title = "Distance reference"
-                snippet = "Used to calculate approximate server distances"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            }
-            map.overlays.add(originMarker)
+    var tileStyle by remember { mutableStateOf("Standard") }
+    val overlayKey = remember(servers, originLat, originLon) {
+        buildString {
+            append(originLat).append(',').append(originLon)
             servers.forEach { server ->
-                val lat = server.latitude
-                val lon = server.longitude
-                if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
-                    val point = GeoPoint(lat, lon)
-                    val distance = server.distanceKm?.let {
-                        String.format(java.util.Locale.US, "%.1f km away", it)
-                    } ?: "Distance unavailable"
-                    val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
+                append('|').append(server.serverId).append(':')
+                    .append(server.latitude).append(',').append(server.longitude)
+                    .append(':').append(server.label)
+            }
+        }
+    }
+
+    Box(modifier = modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { viewContext ->
+                val preferences = viewContext.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
+                Configuration.getInstance().load(viewContext, preferences)
+                // OSM tile servers need a descriptive User-Agent rather than a generic package name.
+                Configuration.getInstance().userAgentValue = "SpeedTester/4.4 (Android; com.speedtester.app)"
+                MapView(viewContext).apply {
+                    setTileSource(TileSourceFactory.MAPNIK)
+                    setMultiTouchControls(true)
+                    setBuiltInZoomControls(false)
+                    controller.setZoom(8.0)
+                    controller.setCenter(GeoPoint(originLat, originLon))
+                    tag = "Standard"
+                    mapView = this
+                }
+            },
+            update = { map ->
+                if (map.tag != tileStyle) {
+                    val source = when (tileStyle) {
+                        "Topographic" -> TileSourceFactory.USGS_TOPO
+                        "Cycle" -> TileSourceFactory.CYCLE
+                        else -> TileSourceFactory.MAPNIK
+                    }
+                    map.setTileSource(source)
+                    map.tag = tileStyle
+                    map.invalidate()
+                }
+                if (map.getTag(R.id.map_overlay_key) != overlayKey) {
+                    map.overlays.clear()
+                    val origin = GeoPoint(originLat, originLon)
                     map.overlays.add(Marker(map).apply {
-                        position = point
-                        title = server.label
-                        snippet = "${server.city}\n$distance · $ping\n${server.host}"
+                        position = origin
+                        title = "Distance reference"
+                        snippet = "Used to calculate approximate server distances"
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     })
+                    servers.forEach { server ->
+                        val lat = server.latitude
+                        val lon = server.longitude
+                        if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                            val distance = server.distanceKm?.let {
+                                String.format(java.util.Locale.US, "%.1f km away", it)
+                            } ?: "Distance unavailable"
+                            val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
+                            map.overlays.add(Marker(map).apply {
+                                position = GeoPoint(lat, lon)
+                                title = server.label
+                                snippet = "${server.city}\n$distance · $ping\n${server.host}"
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            })
+                        }
+                    }
+                    map.setTag(R.id.map_overlay_key, overlayKey)
+                    map.invalidate()
                 }
             }
-            map.invalidate()
+        )
+
+        // Style and zoom controls remain outside the native map view so they do not
+        // interfere with drag/pinch gestures.
+        Row(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .padding(8.dp)
+                .background(Color(0xEE101820), RoundedCornerShape(14.dp))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf("Standard", "Topographic", "Cycle").forEach { style ->
+                TextButton(
+                    onClick = { tileStyle = style },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(style, color = if (tileStyle == style) Teal else Color.White,
+                        style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
-    )
+
+        Column(
+            modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp)
+                .background(Color(0xEE101820), RoundedCornerShape(14.dp))
+                .padding(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            TextButton(onClick = { mapView?.controller?.zoomIn() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
+                Text("+", color = Color.White, style = MaterialTheme.typography.titleLarge)
+            }
+            TextButton(onClick = { mapView?.controller?.zoomOut() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
+                Text("−", color = Color.White, style = MaterialTheme.typography.titleLarge)
+            }
+            TextButton(onClick = {
+                mapView?.controller?.animateTo(GeoPoint(originLat, originLon))
+                mapView?.controller?.setZoom(8.0)
+            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                Text("Here", color = Teal, style = MaterialTheme.typography.labelMedium)
+            }
+            TextButton(onClick = {
+                val points = servers.mapNotNull { server ->
+                    val lat = server.latitude
+                    val lon = server.longitude
+                    if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) GeoPoint(lat, lon) else null
+                }
+                if (points.isNotEmpty()) {
+                    val north = points.maxOf { it.latitude }
+                    val south = points.minOf { it.latitude }
+                    val east = points.maxOf { it.longitude }
+                    val west = points.minOf { it.longitude }
+                    mapView?.zoomToBoundingBox(org.osmdroid.util.BoundingBox(north, east, south, west), true, 48)
+                }
+            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                Text("Fit", color = Teal, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner, mapView) {
         val currentMapView = mapView
@@ -854,6 +941,7 @@ private fun ServerMapView(
         }
     }
 }
+
 private data class NdtTcpInfo(
     val minRttUs: Long? = null, val rttUs: Long? = null, val rttVarUs: Long? = null,
     val bytesRetrans: Long? = null, val bytesSent: Long? = null, val bytesAcked: Long? = null,
