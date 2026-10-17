@@ -5,7 +5,7 @@ plugins {
 }
 
 val appVersion = (findProperty("appVersion") as String?) ?: "1.0"
-require(Regex("\\d+\\.\\d").matches(appVersion)) { "appVersion must look like 1.0" }
+require(Regex("\\\\d+\\\\.\\\\d").matches(appVersion)) { "appVersion must look like 1.0" }
 val appVersionCode = appVersion.split(".").let { it[0].toInt() * 10 + it[1].toInt() }
 
 android {
@@ -19,17 +19,9 @@ android {
         versionName = appVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    signingConfigs {
-        create("release") {
-            storeFile = file((findProperty("signingStoreFile") as String?) ?: "missing-release-key.jks")
-            storePassword = findProperty("signingStorePassword") as String?
-            keyAlias = findProperty("signingKeyAlias") as String?
-            keyPassword = findProperty("signingKeyPassword") as String?
-        }
-    }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // CI signs the unsigned release APK using the encrypted MRadio signing material.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 1.1. Leave empty to increment the latest release."
+        description: 'Version to release, e.g. 1.1. Leave empty to increment the latest release.'
         required: false
-        default: ""
+        default: ''
 
 permissions:
   contents: write
@@ -24,26 +24,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.13"
+          gradle-version: '8.13'
 
-      - name: Calculate version and release notes
+      - name: Work out version and release notes
         env:
           REQUESTED: ${{ github.event.inputs.version }}
         run: |
-          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]$' | sort -V | tail -1 || true)
+          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\\.[0-9]$' | sort -V | tail -1 || true)
           if [ -n "$REQUESTED" ]; then
-            echo "$REQUESTED" | grep -Eq '^[0-9]+\.[0-9]$' || { echo "::error::Version must look like 1.0"; exit 1; }
+            echo "$REQUESTED" | grep -Eq '^[0-9]+\\.[0-9]$' || { echo "::error::Version must look like 1.0"; exit 1; }
             ver="$REQUESTED"
           elif [ -z "$last" ]; then
             ver="1.0"
@@ -53,70 +53,66 @@ jobs:
           fi
           echo "VERSION=$ver" >> "$GITHUB_ENV"
           prev="$last"
+          [ -n "$prev" ] || prev=$(git tag -l 'build-*' | sort -V | tail -1 || true)
           if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
           changes=$(git log --no-merges --pretty='- %s' $range | head -40)
-          [ -n "$changes" ] || changes="- Build and validation"
+          [ -n "$changes" ] || changes="- Rebuild, no code changes"
           {
-            echo "## SpeedTester $ver"
+            echo "## $APP $ver"
             echo
             echo "### What's new"
             echo "$changes"
             echo
-            echo "Install the APK attached below. Android will ask you to confirm installation."
+            echo "### Install"
+            echo "Download the APK below and install it on your phone."
             echo
-            echo "_Built from ${GITHUB_SHA::7}_"
+            echo "_Built from \`${GITHUB_SHA::7}\`${prev:+ · changes since \`$prev\`}_"
           } > release-notes.md
+          cat release-notes.md
 
       - name: Compile and test
         run: gradle --no-daemon testDebugUnitTest assembleDebug -PappVersion="$VERSION"
 
-      - name: Configure signing
+      - name: Build release APK
+        run: gradle --no-daemon assembleRelease -PappVersion="$VERSION"
+
+      - name: Sign APK using MRadio signing pipeline
         env:
-          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_PASSPHRASE: ${{ secrets.SIGNING_PASSPHRASE }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Configure SIGNING_KEYSTORE_BASE64, SIGNING_KEYSTORE_PASSWORD, SIGNING_KEY_ALIAS and SIGNING_KEY_PASSWORD repository secrets."
+          if [ -z "$SIGNING_PASSPHRASE" ]; then
+            echo "::error title=Missing signing secret::Add the SIGNING_PASSPHRASE repository secret."
             exit 1
           fi
-          mkdir -p "$RUNNER_TEMP/signing"
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/release.jks"
-          echo "SIGNING_STORE_FILE=$RUNNER_TEMP/signing/release.jks" >> "$GITHUB_ENV"
+          mkdir -p signing-temp
+          K="$RUNNER_TEMP/keys"; mkdir -p "$K"; chmod 700 "$K"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing/keys.tar.enc -pass env:SIGNING_PASSPHRASE | tar -xf - -C "$K"
+          BT=$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/* | sort -V | tail -1)
+          export RP=$(cat "$K/release.pass") OP=android
+          "$BT/apksigner" rotate --out "$K/lineage" \
+            --old-signer --ks "$K/old.keystore" --ks-pass env:OP --ks-key-alias androiddebugkey --key-pass env:OP \
+            --new-signer --ks "$K/release.p12" --ks-pass env:RP --ks-key-alias release --key-pass env:RP
+          "$BT/apksigner" sign \
+            --ks "$K/old.keystore" --ks-pass env:OP --ks-key-alias androiddebugkey --key-pass env:OP \
+            --next-signer --ks "$K/release.p12" --ks-pass env:RP --ks-key-alias release --key-pass env:RP \
+            --lineage "$K/lineage" --rotation-min-sdk-version 28 \
+            --out "$APP-$VERSION.apk" app/build/outputs/apk/release/app-release-unsigned.apk
+          rm -rf "$K"
+          "$BT/apksigner" verify --verbose --print-certs "$APP-$VERSION.apk" | grep -E "Signer.*(DN|SHA-256 digest)"
+          rm -rf signing-temp
 
-      - name: Build signed release
-        env:
-          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: |
-          gradle --no-daemon assembleRelease \
-            -PappVersion="$VERSION" \
-            -PsigningStoreFile="$SIGNING_STORE_FILE" \
-            -PsigningStorePassword="$SIGNING_KEYSTORE_PASSWORD" \
-            -PsigningKeyAlias="$SIGNING_KEY_ALIAS" \
-            -PsigningKeyPassword="$SIGNING_KEY_PASSWORD"
-
-      - name: Verify APK signature
-        run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
-          test -f "$APK"
-          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-          "$BT/apksigner" verify --verbose "$APK"
-
-      - name: Prepare release APK
-        run: cp app/build/outputs/apk/release/app-release.apk "SpeedTester-$VERSION.apk"
-
-      - name: Upload workflow artifact
+      - name: Upload APK (workflow artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: SpeedTester-${{ env.VERSION }}
-          path: SpeedTester-${{ env.VERSION }}.apk
+          name: ${{ env.APP }}-${{ env.VERSION }}
+          path: ${{ env.APP }}-${{ env.VERSION }}.apk
 
-      - name: Publish GitHub Release
+      - name: Publish APK as a release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
-          name: SpeedTester ${{ env.VERSION }}
+          name: ${{ env.APP }} ${{ env.VERSION }}
           body_path: release-notes.md
-          files: SpeedTester-${{ env.VERSION }}.apk
+          files: ${{ env.APP }}-${{ env.VERSION }}.apk
           make_latest: true
