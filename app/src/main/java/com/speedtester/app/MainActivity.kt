@@ -53,6 +53,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.net.Socket
+import java.net.InetAddress
 import java.net.URL
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
@@ -102,6 +103,10 @@ private fun SpeedTesterApp(context: Context) {
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
+    var downloadTcp by remember { mutableStateOf<NdtTcpInfo?>(null) }
+    var uploadTcp by remember { mutableStateOf<NdtTcpInfo?>(null) }
+    var serverIp by remember { mutableStateOf("") }
+    var dnsLookupMs by remember { mutableLongStateOf(-1L) }
     var loggedPhase by remember { mutableStateOf("") }
     var livePing by remember { mutableLongStateOf(-1L) }
     var liveJitter by remember { mutableDoubleStateOf(0.0) }
@@ -190,6 +195,8 @@ private fun SpeedTesterApp(context: Context) {
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message) } })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
+                                                downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
+                                                serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
                                                 downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
                                                 loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount)
@@ -325,6 +332,49 @@ private fun SpeedTesterApp(context: Context) {
                                 InfoRow("Idle TCP latency", if (ping >= 0) "$ping ms" else "—")
                                 InfoRow("Jitter", if (ping >= 0) "%.1f ms".format(java.util.Locale.US, jitter) else "—")
                                 InfoRow("Network", netInfo.type)
+                                InfoRow("Resolved server IP", serverIp.ifBlank { "Not resolved yet" })
+                                InfoRow("DNS lookup", if (dnsLookupMs >= 0L) "$dnsLookupMs ms" else "—")
+                                val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                Text("INTERNET QUALITY", color = Muted, style = MaterialTheme.typography.labelLarge)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(76.dp).background(Color(0xFF0D151B), RoundedCornerShape(18.dp))) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(if (quality.score > 0) quality.score.toString() else "—", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Teal)
+                                            Text("/100", style = MaterialTheme.typography.labelSmall, color = Muted)
+                                        }
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(quality.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text(quality.detail, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                Text("ADVANCED TCP DIAGNOSTICS", color = Muted, style = MaterialTheme.typography.labelLarge)
+                                Text("Server-reported TCP_INFO values are available only when the selected M-Lab server sends them.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Download direction", fontWeight = FontWeight.SemiBold)
+                                TcpInfoRows(downloadTcp)
+                                Text("Upload direction", fontWeight = FontWeight.SemiBold)
+                                TcpInfoRows(uploadTcp)
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                Text("CONNECTION PATH", color = Muted, style = MaterialTheme.typography.labelLarge)
+                                InfoRow("DNS resolution", if (dnsLookupMs >= 0L) "Completed in $dnsLookupMs ms" else "Not measured")
+                                InfoRow("TCP connect latency", if (ping >= 0L) "Average $ping ms" else "Not measured")
+                                Text("NDT7 Locate does not expose a hop-by-hop traceroute. These are endpoint diagnostics, not a map of every router between you and M-Lab.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                Text("YOUR RECENT BASELINE", color = Muted, style = MaterialTheme.typography.labelLarge)
+                                val previous = history.drop(1).take(10)
+                                if (previous.isNotEmpty()) {
+                                    InfoRow("Recent download average", "%.1f Mbps".format(java.util.Locale.US, previous.map { it.download }.average()))
+                                    InfoRow("Recent upload average", "%.1f Mbps".format(java.util.Locale.US, previous.map { it.upload }.average()))
+                                    InfoRow("Current download vs baseline", if (previous.map { it.download }.average() > 0.0) "%+.0f%%".format(java.util.Locale.US, (download / previous.map { it.download }.average() - 1.0) * 100.0) else "Not enough data")
+                                    InfoRow("Previous tests used", previous.size.toString())
+                                } else Text("Run more tests to build a personal baseline.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                Text("M-LAB REGIONAL RESEARCH", color = Muted, style = MaterialTheme.typography.labelLarge)
+                                Text("M-Lab publishes historical NDT7 measurements in BigQuery, including dynamic-server data. It does not provide an unauthenticated regional-average endpoint for direct mobile-app queries. Live country/ISP comparisons need a small query backend; this link opens the public data documentation.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.measurementlab.net/data/docs/"))) }) { Text("Explore M-Lab public data") }
                                 Text("M-Lab chooses an available nearby server automatically. Server city coordinates are approximate; map tiles are provided by OpenStreetMap.", color = Muted, style = MaterialTheme.typography.bodySmall)
                             }
                         }
@@ -485,6 +535,20 @@ private object ServerGeoLocator {
         }.getOrNull()
     }
 }
+@Composable private fun TcpInfoRows(info: NdtTcpInfo?) {
+    if (info == null || listOf(info.minRttUs, info.rttUs, info.rttVarUs, info.bytesRetrans, info.busyTimeUs, info.receiverLimitedUs, info.senderLimitedUs).all { it == null }) {
+        Text("Server did not provide TCP_INFO samples for this direction.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    InfoRow("Server minimum RTT", info.minRttUs?.let { "%.2f ms".format(java.util.Locale.US, it / 1000.0) } ?: "—")
+    InfoRow("Server smoothed RTT", info.rttUs?.let { "%.2f ms".format(java.util.Locale.US, it / 1000.0) } ?: "—")
+    InfoRow("RTT variation", info.rttVarUs?.let { "%.2f ms".format(java.util.Locale.US, it / 1000.0) } ?: "—")
+    InfoRow("TCP retransmitted bytes", info.bytesRetrans?.toString() ?: "—")
+    InfoRow("Retransmission ratio", info.retransmissionPercent?.let { "%.3f%% (rough indicator)".format(java.util.Locale.US, it) } ?: "—")
+    InfoRow("Sender busy time", info.busyTimeUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
+    InfoRow("Receiver-window limited", info.receiverLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
+    InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
+}
 @Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
     val html = remember(latitude, longitude) {
         """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head><body style="margin:0;background:#0d151b"><div id="map" style="width:100%;height:100vh"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map').setView([$latitude,$longitude],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);L.marker([$latitude,$longitude]).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();</script></body></html>"""
@@ -504,8 +568,28 @@ private object ServerGeoLocator {
         }
     })
 }
-private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int)
-private data class NdtMeasurement(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val elapsedSeconds: Double)
+private data class NdtTcpInfo(
+    val minRttUs: Long? = null, val rttUs: Long? = null, val rttVarUs: Long? = null,
+    val bytesRetrans: Long? = null, val bytesSent: Long? = null, val bytesAcked: Long? = null,
+    val busyTimeUs: Long? = null, val receiverLimitedUs: Long? = null, val senderLimitedUs: Long? = null
+) {
+    val retransmissionPercent: Double? get() = if ((bytesSent ?: 0L) > 0L && bytesRetrans != null) bytesRetrans!!.toDouble() * 100.0 / bytesSent!! else null
+}
+private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int, val downloadTcp: NdtTcpInfo?, val uploadTcp: NdtTcpInfo?, val serverIp: String, val dnsLookupMs: Long)
+private data class NdtMeasurement(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val elapsedSeconds: Double, val tcpInfo: NdtTcpInfo?)
+private data class QualityAssessment(val score: Int, val label: String, val detail: String)
+private fun assessQuality(download: Double, upload: Double, ping: Long, jitter: Double, loadedPing: Long, failed: Int, probes: Int): QualityAssessment {
+    if (download <= 0.0 && upload <= 0.0 && ping < 0L) return QualityAssessment(0, "Not rated", "Run a speed test to calculate a score.")
+    val downScore = (download / 100.0).coerceIn(0.0, 1.0) * 35.0
+    val upScore = (upload / 50.0).coerceIn(0.0, 1.0) * 20.0
+    val pingScore = if (ping < 0L) 0.0 else (1.0 - ((ping - 15L).coerceAtLeast(0L) / 185.0)).coerceIn(0.0, 1.0) * 20.0
+    val jitterScore = (1.0 - (jitter / 50.0)).coerceIn(0.0, 1.0) * 10.0
+    val loadedScore = if (loadedPing < 0L || ping < 0L) 5.0 else (1.0 - ((loadedPing - ping).coerceAtLeast(0L) / 250.0)).coerceIn(0.0, 1.0) * 10.0
+    val stabilityScore = if (probes <= 0) 5.0 else ((probes - failed).coerceAtLeast(0).toDouble() / probes) * 5.0
+    val score = (downScore + upScore + pingScore + jitterScore + loadedScore + stabilityScore).toInt().coerceIn(0, 100)
+    val label = when { score >= 85 -> "Excellent"; score >= 70 -> "Very good"; score >= 50 -> "Good"; score >= 30 -> "Fair"; else -> "Needs attention" }
+    return QualityAssessment(score, label, "A SpeedTester estimate based on speed, latency, jitter and stability—not an official M-Lab rating.")
+}
 private object SpeedEngine {
     private const val LOCATE_URL = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0"
     private const val PROTOCOL = "net.measurementlab.ndt.v7"
@@ -559,6 +643,10 @@ private object SpeedEngine {
         onLog("Upload URL: " + upUrl)
         onLog("Download and upload each run for up to 10 seconds")
 
+        val dnsStart = System.nanoTime()
+        val resolvedAddress = runCatching { InetAddress.getAllByName(host).firstOrNull()?.hostAddress.orEmpty() }.getOrDefault("")
+        val dnsLookupMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - dnsStart)
+        onLog("DNS lookup: " + (resolvedAddress.ifBlank { "failed" }) + " in " + dnsLookupMs + "ms")
         val pings = mutableListOf<Long>()
         repeat(10) { index ->
             val started = System.nanoTime()
@@ -582,11 +670,13 @@ private object SpeedEngine {
             runNdtWebSocket(downUrl, false) { fraction, mbps -> onUpdate("Downloading · M-Lab NDT7", (.08f + .42f * fraction).coerceIn(.08f, .50f), mbps) }
         }
         onLog("DOWNLOAD: bytes=" + down.bytes + ", elapsed=" + "%.2f".format(java.util.Locale.US, down.elapsedSeconds) + "s, average=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, peak=" + "%.2f".format(java.util.Locale.US, down.peakMbps) + " Mbps")
+        down.tcpInfo?.let { onLog("DOWNLOAD TCP_INFO: minRTT=" + (it.minRttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms RTT=" + (it.rttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms retrans=" + (it.retransmissionPercent?.let { v -> "%.3f".format(java.util.Locale.US, v) + "%" } ?: "n/a")) }
         onUpdate("Uploading · M-Lab NDT7", .55f, 0f)
         val up = kotlinx.coroutines.withTimeout(15_000L) {
             runNdtWebSocket(upUrl, true) { fraction, mbps -> onUpdate("Uploading · M-Lab NDT7", (.55f + .40f * fraction).coerceIn(.55f, .95f), mbps) }
         }
         onLog("UPLOAD: bytes=" + up.bytes + ", elapsed=" + "%.2f".format(java.util.Locale.US, up.elapsedSeconds) + "s, average=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, peak=" + "%.2f".format(java.util.Locale.US, up.peakMbps) + " Mbps")
+        up.tcpInfo?.let { onLog("UPLOAD TCP_INFO: minRTT=" + (it.minRttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms RTT=" + (it.rttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms retrans=" + (it.retransmissionPercent?.let { v -> "%.3f".format(java.util.Locale.US, v) + "%" } ?: "n/a")) }
         onUpdate("Checking connection stability", .96f, 0f)
         val loaded = mutableListOf<Long>()
         var failed = 0
@@ -603,7 +693,7 @@ private object SpeedEngine {
         val loadedJitter = if (loaded.size > 1) loaded.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
         onLog("NDT7 server: " + host + " (" + locationName + ")")
         onUpdate("Complete", 1f, 0f)
-        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5)
+        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, down.tcpInfo, up.tcpInfo, resolvedAddress, dnsLookupMs)
     }
 
     private suspend fun runNdtWebSocket(url: String, isUpload: Boolean, onProgress: (Float, Float) -> Unit): NdtMeasurement =
@@ -616,6 +706,18 @@ private object SpeedEngine {
                 val finished = java.util.concurrent.atomic.AtomicBoolean(false)
                 val rates = java.util.Collections.synchronizedList(mutableListOf<Double>())
                 val socketRef = java.util.concurrent.atomic.AtomicReference<okhttp3.WebSocket?>(null)
+                val latestTcpInfo = java.util.concurrent.atomic.AtomicReference<NdtTcpInfo?>(null)
+                fun optionalLong(json: JSONObject, key: String): Long? = if (json.has(key) && !json.isNull(key)) json.optLong(key).takeIf { it >= 0L } else null
+                fun parseServerMeasurement(text: String) {
+                    runCatching {
+                        val tcp = JSONObject(text).optJSONObject("TCPInfo") ?: return@runCatching
+                        latestTcpInfo.set(NdtTcpInfo(
+                            minRttUs = optionalLong(tcp, "MinRTT"), rttUs = optionalLong(tcp, "RTT"), rttVarUs = optionalLong(tcp, "RTTVar"),
+                            bytesRetrans = optionalLong(tcp, "BytesRetrans"), bytesSent = optionalLong(tcp, "BytesSent"), bytesAcked = optionalLong(tcp, "BytesAcked"),
+                            busyTimeUs = optionalLong(tcp, "BusyTime"), receiverLimitedUs = optionalLong(tcp, "RWndLimited"), senderLimitedUs = optionalLong(tcp, "SndBufLimited")
+                        ))
+                    }
+                }
 
                 fun finish(problem: Throwable? = null) {
                     if (!finished.compareAndSet(false, true)) return
@@ -632,7 +734,7 @@ private object SpeedEngine {
                         val samples = synchronized(rates) { rates.toList() }
                         val average = if (samples.isEmpty()) finalRate else samples.average()
                         val peak = samples.maxOrNull() ?: finalRate
-                        if (continuation.isActive) continuation.resume(NdtMeasurement(finalRate, average, peak, transferred, seconds))
+                        if (continuation.isActive) continuation.resume(NdtMeasurement(finalRate, average, peak, transferred, seconds, latestTcpInfo.get()))
                     }
                 }
 
@@ -678,7 +780,9 @@ private object SpeedEngine {
                     override fun onMessage(webSocket: okhttp3.WebSocket, data: okio.ByteString) {
                         if (!isUpload) { bytes.addAndGet(data.size.toLong()); report() }
                     }
-                    override fun onMessage(webSocket: okhttp3.WebSocket, text: String) { /* Optional server measurements are not payload bytes. */ }
+                    override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
+                        parseServerMeasurement(text)
+                    }
                     override fun onClosing(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
                         webSocket.close(code, reason)
                         finish(if (code == 1000) null else IllegalStateException("NDT7 server closed with code " + code + ": " + reason))
