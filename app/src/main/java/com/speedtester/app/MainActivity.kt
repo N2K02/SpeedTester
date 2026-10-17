@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
 private fun SpeedTesterApp(context: Context) {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("speedtester", Context.MODE_PRIVATE) }
-    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "https://speed.cloudflare.com") ?: "") }
+    var endpoint by remember { mutableStateOf((prefs.getString("endpoint", "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0") ?: "").takeUnless { it.contains("speed.cloudflare.com", ignoreCase = true) } ?: "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0") }
     var testing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready to test") }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -280,7 +280,7 @@ private fun SpeedTesterApp(context: Context) {
                 }
                 2 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                    item { Text("LibreSpeed-compatible server base URL", color = Muted) }
+                    item { Text("M-Lab NDT7 server discovery URL", color = Muted) }
                     item { OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Server URL") }) }
                     item {
                         Button(onClick = {
@@ -288,7 +288,7 @@ private fun SpeedTesterApp(context: Context) {
                             if (valid) { prefs.edit().putString("endpoint", endpoint.trim().trimEnd('/')).apply(); updateMessage = "Server saved" } else updateMessage = "Enter a valid HTTP(S) URL"
                         }) { Text("Save server") }
                     }
-                    item { Text("Default: Cloudflare public speed-test endpoint. For LibreSpeed, enter the backend directory URL containing garbage.php and empty.php, for example https://your-server.example/backend. Other providers need documented compatible endpoints.", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                    item { Text("Default: M-Lab NDT7 automatic server discovery. SpeedTester selects an available test server automatically; do not enter a regular website URL. NDT7 test measurements are shared with M-Lab and may be published with your IP address.", color = Muted, style = MaterialTheme.typography.bodySmall) }
                     item { Text("Data usage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     item { Text("A full test transfers several megabytes. Tests run only on demand; no background speed testing.", color = Muted) }
                     item { Text("Updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
@@ -412,130 +412,191 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note)
 }
 private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int)
+private data class NdtMeasurement(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val elapsedSeconds: Double)
 private object SpeedEngine {
-    private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build()
+    private const val LOCATE_URL = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0"
+    private const val PROTOCOL = "net.measurementlab.ndt.v7"
+    private const val TEST_SECONDS = 10.0
+    private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(0, TimeUnit.MILLISECONDS).build()
+
     suspend fun run(base: String, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
-        require(base.startsWith("https://") || base.startsWith("http://")) { "Server URL must start with HTTP or HTTPS" }
-        val parsed = URL(base); val host = parsed.host; val port = if (parsed.port > 0) parsed.port else if (base.startsWith("https")) 443 else 80
-        onLog("Parsed target host=$host port=$port protocol=${parsed.protocol}")
-        onLog("HTTP timeouts: connect=8s read=20s write=20s call=35s")
+        val locateUrl = if (base.contains("locate.measurementlab.net", true)) base else LOCATE_URL
+        onLog("Engine: M-Lab NDT7 over secure WebSockets")
+        onLog("Discovery URL: " + locateUrl)
+        onLog("NDT7 subprotocol: " + PROTOCOL)
+        val json = client.newCall(Request.Builder().url(locateUrl).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
+            onLog("DISCOVERY HTTP " + response.code + " " + response.message)
+            if (!response.isSuccessful) error("M-Lab discovery failed: HTTP " + response.code)
+            JSONObject(response.body?.string() ?: error("M-Lab returned an empty response"))
+        }
+        val results = json.optJSONArray("results") ?: error("M-Lab discovery returned no server results")
+        var downUrl = ""
+        var upUrl = ""
+        var locationName = "location unavailable"
+        for (i in 0 until results.length()) {
+            val result = results.optJSONObject(i) ?: continue
+            val urls = result.optJSONObject("urls") ?: continue
+            var d = urls.optString("wss:///ndt/v7/download")
+            var u = urls.optString("wss:///ndt/v7/upload")
+            val keys = urls.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (key.contains("ndt/v7/download")) d = urls.optString(key)
+                if (key.contains("ndt/v7/upload")) u = urls.optString(key)
+            }
+            if (d.startsWith("wss://") && u.startsWith("wss://")) {
+                downUrl = d
+                upUrl = u
+                val loc = result.optJSONObject("location")
+                locationName = listOf(loc?.optString("city").orEmpty(), loc?.optString("country").orEmpty()).filter { it.isNotBlank() && it != "null" }.joinToString(", ").ifBlank { locationName }
+                break
+            }
+        }
+        if (downUrl.isBlank() || upUrl.isBlank()) error("M-Lab discovery found no usable secure NDT7 server")
+        val uri = java.net.URI(downUrl)
+        val host = uri.host ?: error("M-Lab returned an invalid server URL")
+        val port = if (uri.port > 0) uri.port else 443
+        onLog("Selected server: " + host + " (" + locationName + ")")
+        onLog("Download URL: " + downUrl)
+        onLog("Upload URL: " + upUrl)
+        onLog("Download and upload each run for up to 10 seconds")
+
         val pings = mutableListOf<Long>()
-        repeat(10) { probeIndex ->
-            val start = System.nanoTime()
+        repeat(10) { index ->
+            val started = System.nanoTime()
             try {
                 Socket().use { it.connect(java.net.InetSocketAddress(host, port), 3000) }
-                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
-                pings.add(elapsedMs)
-                onLog("TCP probe ${probeIndex + 1}/10 OK: ${elapsedMs}ms")
+                val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                pings.add(ms)
+                onLog("TCP probe " + (index + 1) + "/10 OK: " + ms + "ms")
             } catch (e: Exception) {
-                onLog("TCP probe ${probeIndex + 1}/10 FAILED: ${e.javaClass.simpleName}: ${e.message}")
+                onLog("TCP probe " + (index + 1) + "/10 FAILED: " + e.javaClass.simpleName + ": " + e.message)
                 throw e
             }
-            val avg = pings.average().toLong()
-            val j = if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
-            onMetrics(avg, j)
-            onUpdate("Measuring latency", (.02f + .06f * pings.size / 10f), 0f)
+            onMetrics(pings.average().toLong(), if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0)
+            onUpdate("Measuring latency", .02f + .06f * pings.size / 10f, 0f)
             kotlinx.coroutines.delay(180)
         }
         val ping = pings.average().toLong()
-        val jitter = if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
-        onUpdate("Downloading", .08f, 0f)
-        kotlinx.coroutines.delay(350)
-        val cloudflare = URL(base).host.equals("speed.cloudflare.com", ignoreCase = true)
-        val downloadUrl = if (cloudflare) base + "/__down?bytes=16000000&nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&ckSize=8&nocache=" + System.nanoTime()
-        onLog("DOWNLOAD request URL: $downloadUrl")
-        val request = Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android").build()
-        val downloadRates = mutableListOf<Double>()
-        val started = System.nanoTime(); var bytes = 0L; var lastReportNanos = started; var lastReportBytes = 0L
-        client.newCall(request).execute().use { response ->
-            onLog("DOWNLOAD response: HTTP ${response.code} ${response.message}; content-type=${response.header("Content-Type") ?: "unknown"}; content-length=${response.header("Content-Length") ?: "unknown"}; server=${response.header("Server") ?: "not disclosed"}; cf-ray=${response.header("cf-ray") ?: "not provided"}")
-            if (!response.isSuccessful) {
-                val bodyPreview = runCatching { response.peekBody(1024).string().replace(Regex("\\s+"), " ").take(500) }.getOrDefault("unavailable")
-                onLog("DOWNLOAD HTTP ERROR body preview: $bodyPreview")
-                error(if (response.code == 403 && cloudflare) "Cloudflare refused the speed-test download (HTTP 403). Try opening https://speed.cloudflare.com in your browser; if it works there but not here, use another LibreSpeed-compatible server. Response: $bodyPreview" else "Download failed: HTTP ${response.code}. URL: ${URL(downloadUrl).host}${URL(downloadUrl).path}. Body: $bodyPreview")
-            }
-            val stream = response.body?.byteStream() ?: error("Empty download response"); val buffer = ByteArray(32 * 1024)
-            while (true) {
-                val n = stream.read(buffer); if (n < 0) break; bytes += n
-                val expectedBytes = if (cloudflare) 16_000_000.0 else 8_000_000.0
-                val fraction = (bytes.toDouble() / expectedBytes).coerceIn(0.0, 1.0)
-                val elapsed = (System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0
-                val now = System.nanoTime()
-                if (now - lastReportNanos >= 200_000_000L || bytes - lastReportBytes >= 8_000_000L) {
-                    val windowSeconds = (now - lastReportNanos).coerceAtLeast(1) / 1_000_000_000.0
-                    val liveMbps = ((bytes - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).coerceAtLeast(0.0)
-                    if (liveMbps > 0.0) downloadRates.add(liveMbps)
-                    onUpdate("Downloading", (.08 + .42 * fraction).toFloat(), liveMbps.toFloat())
-                    lastReportNanos = now; lastReportBytes = bytes
-                }
-            }
+        val jitter = pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
+        onUpdate("Downloading · M-Lab NDT7", .08f, 0f)
+        val down = kotlinx.coroutines.withTimeout(15_000L) {
+            runNdtWebSocket(downUrl, false) { fraction, mbps -> onUpdate("Downloading · M-Lab NDT7", (.08f + .42f * fraction).coerceIn(.08f, .50f), mbps) }
         }
-        val downloadElapsed = (System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0
-        val downloadMbps = bytes * 8.0 / downloadElapsed / 1_000_000.0
-        onLog("DOWNLOAD complete: bytes=$bytes elapsed=${"%.3f".format(java.util.Locale.US, downloadElapsed)}s rate=${"%.2f".format(java.util.Locale.US, downloadMbps)}Mbps samples=${downloadRates.size}")
-        if (downloadRates.isEmpty()) downloadRates.add(downloadMbps) else if (downloadRates.size == 1) downloadRates.add(downloadMbps)
-        onUpdate("Uploading", .55f, 0f)
-        val payload = ByteArray(4_000_000); java.security.SecureRandom().nextBytes(payload)
-        val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/empty.php?cors=true&nocache=" + System.nanoTime()
-        onLog("UPLOAD request URL: $uploadUrl")
-        onLog("UPLOAD payload: 4000000 bytes; randomised with SecureRandom; POST")
-        kotlinx.coroutines.delay(350)
-        val uploadStart = System.nanoTime()
-        val uploadRates = mutableListOf<Double>()
-        val uploadBody = object : okhttp3.RequestBody() {
-            override fun contentType(): okhttp3.MediaType? = null
-            override fun contentLength(): Long = payload.size.toLong()
-            override fun writeTo(sink: okio.BufferedSink) {
-                var offset = 0
-                var lastReportNanos = uploadStart
-                var lastReportBytes = 0
-                while (offset < payload.size) {
-                    val count = minOf(64 * 1024, payload.size - offset)
-                    sink.write(payload, offset, count)
-                    offset += count
-                    val now = System.nanoTime()
-                    if (now - lastReportNanos >= 200_000_000L || offset == payload.size) {
-                        val windowSeconds = (now - lastReportNanos).coerceAtLeast(1) / 1_000_000_000.0
-                        val liveMbps = ((offset - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).coerceAtLeast(0.0)
-                        if (liveMbps > 0.0) uploadRates.add(liveMbps)
-                        onUpdate("Uploading", (.55 + .4 * offset / payload.size).toFloat(), liveMbps.toFloat())
-                        lastReportNanos = now
-                        lastReportBytes = offset
-                    }
-                }
-            }
+        onLog("DOWNLOAD: bytes=" + down.bytes + ", elapsed=" + "%.2f".format(java.util.Locale.US, down.elapsedSeconds) + "s, average=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, peak=" + "%.2f".format(java.util.Locale.US, down.peakMbps) + " Mbps")
+        onUpdate("Uploading · M-Lab NDT7", .55f, 0f)
+        val up = kotlinx.coroutines.withTimeout(15_000L) {
+            runNdtWebSocket(upUrl, true) { fraction, mbps -> onUpdate("Uploading · M-Lab NDT7", (.55f + .40f * fraction).coerceIn(.55f, .95f), mbps) }
         }
-        val uploadRequest = Request.Builder().url(uploadUrl).post(uploadBody).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android").build()
-        client.newCall(uploadRequest).execute().use { response ->
-            onLog("UPLOAD response: HTTP ${response.code} ${response.message}; content-type=${response.header("Content-Type") ?: "unknown"}; server=${response.header("Server") ?: "not disclosed"}")
-            if (!response.isSuccessful) {
-                val bodyPreview = runCatching { response.peekBody(1024).string().replace(Regex("\\s+"), " ").take(500) }.getOrDefault("unavailable")
-                onLog("UPLOAD HTTP ERROR body preview: $bodyPreview")
-                error("Upload failed: HTTP ${response.code}. URL: ${URL(uploadUrl).host}${URL(uploadUrl).path}. Body: $bodyPreview")
-            }
-        }
-        val uploadElapsed = (System.nanoTime() - uploadStart).coerceAtLeast(1) / 1_000_000_000.0
-        val uploadMbps = payload.size * 8.0 / uploadElapsed / 1_000_000.0
-        onLog("UPLOAD complete: bytes=${payload.size} elapsed=${"%.3f".format(java.util.Locale.US, uploadElapsed)}s rate=${"%.2f".format(java.util.Locale.US, uploadMbps)}Mbps samples=${uploadRates.size}")
-        if (uploadRates.isEmpty()) uploadRates.add(uploadMbps) else if (uploadRates.size == 1) uploadRates.add(uploadMbps)
-        onUpdate("Uploading", .95f, uploadMbps.toFloat())
+        onLog("UPLOAD: bytes=" + up.bytes + ", elapsed=" + "%.2f".format(java.util.Locale.US, up.elapsedSeconds) + "s, average=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, peak=" + "%.2f".format(java.util.Locale.US, up.peakMbps) + " Mbps")
         onUpdate("Checking connection stability", .96f, 0f)
-        val loadedPings = mutableListOf<Long>()
+        val loaded = mutableListOf<Long>()
         var failed = 0
         repeat(5) {
             try {
-                val probeStart = System.nanoTime()
+                val t = System.nanoTime()
                 Socket().use { it.connect(java.net.InetSocketAddress(host, port), 1500) }
-                loadedPings.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - probeStart))
+                loaded.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t))
             } catch (_: Exception) { failed++ }
             kotlinx.coroutines.delay(100)
         }
-        onLog("STABILITY probes: successful=${loadedPings.size}/5 failed=$failed")
-        val loadedPing = if (loadedPings.isNotEmpty()) loadedPings.average().toLong() else -1L
-        val loadedJitter = if (loadedPings.size > 1) loadedPings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
+        onLog("STABILITY probes: successful=" + loaded.size + "/5 failed=" + failed)
+        val loadedPing = if (loaded.isNotEmpty()) loaded.average().toLong() else -1L
+        val loadedJitter = if (loaded.size > 1) loaded.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
+        onLog("NDT7 server: " + host + " (" + locationName + ")")
         onUpdate("Complete", 1f, 0f)
-        SpeedOutcome(downloadMbps, uploadMbps, ping, jitter, downloadRates.average(), downloadRates.maxOrNull() ?: downloadMbps, uploadRates.average(), uploadRates.maxOrNull() ?: uploadMbps, loadedPing, loadedJitter, failed, 5)
+        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5)
     }
+
+    private suspend fun runNdtWebSocket(url: String, isUpload: Boolean, onProgress: (Float, Float) -> Unit): NdtMeasurement =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                val bytes = java.util.concurrent.atomic.AtomicLong(0L)
+                val startedAt = java.util.concurrent.atomic.AtomicLong(0L)
+                val lastAt = java.util.concurrent.atomic.AtomicLong(0L)
+                val lastBytes = java.util.concurrent.atomic.AtomicLong(0L)
+                val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+                val rates = java.util.Collections.synchronizedList(mutableListOf<Double>())
+                val socketRef = java.util.concurrent.atomic.AtomicReference<okhttp3.WebSocket?>(null)
+
+                fun finish(problem: Throwable? = null) {
+                    if (!finished.compareAndSet(false, true)) return
+                    val start = startedAt.get()
+                    val seconds = if (start > 0L) (System.nanoTime() - start).coerceAtLeast(1L) / 1_000_000_000.0 else 0.0
+                    val pending = if (isUpload) socketRef.get()?.queueSize() ?: 0L else 0L
+                    val transferred = (bytes.get() - pending).coerceAtLeast(0L)
+                    if (problem != null) {
+                        if (continuation.isActive) continuation.resumeWithException(problem)
+                    } else if (transferred <= 0L || seconds <= 0.0) {
+                        if (continuation.isActive) continuation.resumeWithException(IllegalStateException("NDT7 " + (if (isUpload) "upload" else "download") + " transferred no data"))
+                    } else {
+                        val finalRate = transferred * 8.0 / seconds / 1_000_000.0
+                        val samples = synchronized(rates) { rates.toList() }
+                        val average = if (samples.isEmpty()) finalRate else samples.average()
+                        val peak = samples.maxOrNull() ?: finalRate
+                        if (continuation.isActive) continuation.resume(NdtMeasurement(finalRate, average, peak, transferred, seconds))
+                    }
+                }
+
+                fun report() {
+                    val start = startedAt.get()
+                    if (start <= 0L || finished.get()) return
+                    val now = System.nanoTime()
+                    val oldTime = lastAt.get()
+                    if (now - oldTime < 200_000_000L) return
+                    val current = bytes.get()
+                    val elapsed = (now - oldTime).coerceAtLeast(1L) / 1_000_000_000.0
+                    val rate = (current - lastBytes.get()).coerceAtLeast(0L) * 8.0 / elapsed / 1_000_000.0
+                    if (rate > 0.0) rates.add(rate)
+                    lastAt.set(now)
+                    lastBytes.set(current)
+                    onProgress(((now - start).toDouble() / 1_000_000_000.0 / TEST_SECONDS).toFloat().coerceIn(0f, 1f), rate.toFloat())
+                }
+
+                val request = Request.Builder().url(url).header("Sec-WebSocket-Protocol", PROTOCOL).header("User-Agent", "SpeedTester-Android/1.0").build()
+                val listener = object : okhttp3.WebSocketListener() {
+                    override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+                        val openedAt = System.nanoTime()
+                        startedAt.set(openedAt); lastAt.set(openedAt); lastBytes.set(0L)
+                        if (isUpload) {
+                            client.dispatcher.executorService.execute {
+                                val payload = ByteArray(16 * 1024).also { java.security.SecureRandom().nextBytes(it) }
+                                val frame = okio.ByteString.of(*payload)
+                                while (!finished.get() && System.nanoTime() - openedAt < TimeUnit.SECONDS.toNanos(10)) {
+                                    if (webSocket.queueSize() < 1_000_000L) {
+                                        if (webSocket.send(frame)) bytes.addAndGet(frame.size.toLong()) else break
+                                    } else {
+                                        try { Thread.sleep(2L) } catch (_: InterruptedException) { break }
+                                    }
+                                    report()
+                                }
+                                if (!finished.get()) {
+                                    webSocket.close(1000, "NDT7 upload complete")
+                                    finish()
+                                }
+                            }
+                        }
+                    }
+                    override fun onMessage(webSocket: okhttp3.WebSocket, data: okio.ByteString) {
+                        if (!isUpload) { bytes.addAndGet(data.size.toLong()); report() }
+                    }
+                    override fun onMessage(webSocket: okhttp3.WebSocket, text: String) { /* Optional server measurements are not payload bytes. */ }
+                    override fun onClosing(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+                        webSocket.close(code, reason)
+                        finish(if (code == 1000) null else IllegalStateException("NDT7 server closed with code " + code + ": " + reason))
+                    }
+                    override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+                        finish(if (code == 1000) null else IllegalStateException("NDT7 server closed with code " + code + ": " + reason))
+                    }
+                    override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
+                        val detail = if (response != null) "HTTP " + response.code + " " + response.message else (t.message ?: t.javaClass.simpleName)
+                        finish(IllegalStateException("NDT7 " + (if (isUpload) "upload" else "download") + " WebSocket failed: " + detail, t))
+                    }
+                }
+                socketRef.set(client.newWebSocket(request, listener))
+                continuation.invokeOnCancellation { socketRef.get()?.cancel() }
+            }
+        }
 }
 private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String)
 private object UpdateChecker {
