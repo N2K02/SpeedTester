@@ -616,46 +616,63 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                3 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                3 -> LazyColumn(
+                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
+                ) {
                     item { Text("App updates", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
-                            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Update, null, tint = Teal, modifier = Modifier.size(30.dp)); Spacer(Modifier.width(12.dp)); Column { Text("SpeedTester", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text("Installed version " + BuildConfig.VERSION_NAME, color = Muted, style = MaterialTheme.typography.bodySmall) } }
-                                if (updateVersion.isNotBlank()) Text("Latest version: " + updateVersion, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text(updateMessage, color = Muted)
-                                if (updateDetails.isNotBlank()) { HorizontalDivider(color = Color(0xFF26343E)); Text("What's new", fontWeight = FontWeight.SemiBold); Text(updateDetails, color = Muted, style = MaterialTheme.typography.bodyMedium) }
-                                if (updateDiagnostics.isNotBlank()) {
-                                    TextButton(onClick = { updateDiagnosticsVisible = !updateDiagnosticsVisible }) { Text(if (updateDiagnosticsVisible) "Hide details" else "Show details") }
-                                    if (updateDiagnosticsVisible) {
-                                        Text(updateDiagnostics, color = Muted, style = MaterialTheme.typography.bodySmall)
-                                        Button(onClick = {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                            clipboard?.setPrimaryClip(ClipData.newPlainText("Update diagnostics", updateDiagnostics))
-                                        }, modifier = Modifier.fillMaxWidth()) { Text("Copy diagnostics") }
-                                    }
+                        UpdateSectionCard("Update status", "Current installation and latest release") {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Icon(Icons.Default.Update, null, tint = Teal, modifier = Modifier.size(30.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("SpeedTester", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                    Text("Installed version ${BuildConfig.VERSION_NAME}", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 }
-                                if (updateDownloading) {
-                                    LinearProgressIndicator(progress = { updateProgress }, modifier = Modifier.fillMaxWidth())
-                                    val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
-                                    val totalText = if (updateTotalBytes > 0L) String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0) else "unknown size"
-                                    Text(if (updateTotalBytes > 0L) "Downloading update: ${(updateProgress * 100).toInt()}% ($downloadedText / $totalText)" else "Downloading update: $downloadedText / $totalText", color = Teal, style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (updateVersion.isNotBlank()) {
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                InfoRow("Latest version", updateVersion)
+                            }
+                            Text(updateMessage, color = Muted, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    if (updateDetails.isNotBlank()) {
+                        item {
+                            UpdateSectionCard("What's new", "Release notes for the latest version") {
+                                Text(updateDetails, color = Muted, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    if (updateDownloading) {
+                        item {
+                            UpdateSectionCard("Download progress", "APK download progress") {
+                                LinearProgressIndicator(progress = { updateProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                                val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
+                                val totalText = if (updateTotalBytes > 0L) String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0) else "unknown size"
+                                Text(if (updateTotalBytes > 0L) "Downloaded ${(updateProgress * 100).toInt()}% · $downloadedText / $totalText" else "Downloaded $downloadedText / $totalText", color = Teal, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    item {
+                        UpdateSectionCard("Update actions", "Check for a release or install the latest APK") {
+                            Button(onClick = {
+                                scope.launch {
+                                    updateDiagnostics = ""
+                                    updateDiagnosticsVisible = false
+                                    updateMessage = "Checking GitHub Releases…"
+                                    val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
+                                    updateVersion = result.version
+                                    updateDetails = result.notes
+                                    updateUrl = result.apkUrl
+                                    updateAvailable = result.available
+                                    updateDiagnostics = result.diagnostics
+                                    updateMessage = result.message
                                 }
+                            }, enabled = !updateDownloading, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
+                            if (updateAvailable && updateUrl.isNotBlank()) {
                                 Button(onClick = {
-                                    scope.launch {
-                                        updateDiagnostics = ""
-                                        updateDiagnosticsVisible = false
-                                        updateMessage = "Checking GitHub Releases…"
-                                        val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
-                                        updateVersion = result.version
-                                        updateDetails = result.notes
-                                        updateUrl = result.apkUrl
-                                        updateAvailable = result.available
-                                        updateDiagnostics = result.diagnostics
-                                        updateMessage = result.message
-                                    }
-                                }, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
-                                if (updateAvailable && updateUrl.isNotBlank()) Button(onClick = {
                                     if (!updateDownloading) scope.launch {
                                         updateDownloading = true
                                         updateProgress = 0f
@@ -688,8 +705,45 @@ private fun SpeedTesterApp(context: Context) {
                             }
                         }
                     }
+                    if (updateDiagnostics.isNotBlank()) {
+                        item {
+                            UpdateSectionCard("Troubleshooting", "Optional technical details for update failures") {
+                                TextButton(onClick = { updateDiagnosticsVisible = !updateDiagnosticsVisible }) { Text(if (updateDiagnosticsVisible) "Hide details" else "Show details") }
+                                if (updateDiagnosticsVisible) {
+                                    Text(updateDiagnostics, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    OutlinedButton(onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        clipboard?.setPrimaryClip(ClipData.newPlainText("Update diagnostics", updateDiagnostics))
+                                    }, modifier = Modifier.fillMaxWidth()) { Text("Copy diagnostics") }
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+
+@Composable
+private fun UpdateSectionCard(
+    title: String,
+    subtitle: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)),
+        shape = RoundedCornerShape(22.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider(color = Color(0xFF26343E))
+            content()
         }
     }
 }
