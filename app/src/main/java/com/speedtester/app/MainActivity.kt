@@ -88,6 +88,10 @@ private fun SpeedTesterApp(context: Context) {
     var updateVersion by remember { mutableStateOf("") }
     var updateUrl by remember { mutableStateOf("") }
     var updateAvailable by remember { mutableStateOf(false) }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateProgress by remember { mutableFloatStateOf(0f) }
+    var updateDownloadedBytes by remember { mutableLongStateOf(0L) }
+    var updateTotalBytes by remember { mutableLongStateOf(-1L) }
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     val diagnosticLog = remember { mutableStateListOf<String>() }
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
@@ -300,6 +304,12 @@ private fun SpeedTesterApp(context: Context) {
                                 if (updateVersion.isNotBlank()) Text("Latest version: " + updateVersion, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(updateMessage, color = Muted)
                                 if (updateDetails.isNotBlank()) { HorizontalDivider(color = Color(0xFF26343E)); Text("What's new", fontWeight = FontWeight.SemiBold); Text(updateDetails, color = Muted, style = MaterialTheme.typography.bodyMedium) }
+                                if (updateDownloading) {
+                                    LinearProgressIndicator(progress = { updateProgress }, modifier = Modifier.fillMaxWidth())
+                                    val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
+                                    val totalText = if (updateTotalBytes > 0L) String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0) else "unknown size"
+                                    Text(if (updateTotalBytes > 0L) "Downloading update: ${(updateProgress * 100).toInt()}% ($downloadedText / $totalText)" else "Downloading update: $downloadedText / $totalText", color = Teal, style = MaterialTheme.typography.bodySmall)
+                                }
                                 Button(onClick = {
                                     scope.launch {
                                         updateMessage = "Checking GitHub Releases…"
@@ -312,8 +322,26 @@ private fun SpeedTesterApp(context: Context) {
                                     }
                                 }, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
                                 if (updateAvailable && updateUrl.isNotBlank()) Button(onClick = {
-                                    scope.launch { updateMessage = withContext(Dispatchers.IO) { UpdateChecker.downloadAndInstall(context, updateUrl) } }
-                                }, modifier = Modifier.fillMaxWidth()) { Text("Download and install") }
+                                    if (!updateDownloading) scope.launch {
+                                        updateDownloading = true
+                                        updateProgress = 0f
+                                        updateDownloadedBytes = 0L
+                                        updateTotalBytes = -1L
+                                        updateMessage = "Preparing update download…"
+                                        val result = withContext(Dispatchers.IO) {
+                                            UpdateChecker.downloadAndInstall(context, updateUrl) { downloaded, total ->
+                                                scope.launch {
+                                                    updateDownloadedBytes = downloaded
+                                                    updateTotalBytes = total
+                                                    if (total > 0L) updateProgress = (downloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                                                    updateMessage = if (total > 0L) "Downloading update… ${(downloaded * 100 / total).coerceIn(0L, 100L)}%" else "Downloading update…"
+                                                }
+                                            }
+                                        }
+                                        updateMessage = result
+                                        updateDownloading = false
+                                    }
+                                }, enabled = !updateDownloading, modifier = Modifier.fillMaxWidth()) { Text(if (updateDownloading) "Downloading…" else "Download and install") }
                             }
                         }
                     }
@@ -530,7 +558,7 @@ private object UpdateChecker {
         }
         ReleaseInfo(tag, notes, apkUrl, available, message)
     } catch (e: Exception) { ReleaseInfo("", "", "", false, "Update check failed: " + (e.message ?: "network error")) }
-    fun downloadAndInstall(context: Context, apkUrl: String): String {
+    fun downloadAndInstall(context: Context, apkUrl: String, onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit): String {
         return try {
         if (!context.packageManager.canRequestPackageInstalls()) {
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -540,7 +568,27 @@ private object UpdateChecker {
         val response = client.newCall(Request.Builder().url(apkUrl).header("User-Agent", "SpeedTester-Android").build()).execute()
         val apkFile = File(context.cacheDir, "updates/SpeedTester-update.apk")
         apkFile.parentFile?.mkdirs()
-        response.use { r -> check(r.isSuccessful) { "APK download failed: HTTP " + r.code }; val body = r.body ?: error("GitHub returned an empty APK"); body.byteStream().use { input -> apkFile.outputStream().use { output -> input.copyTo(output) } } }
+        response.use { r ->
+            if (!r.isSuccessful) error("APK download failed: HTTP ${r.code}")
+            val body = r.body ?: error("GitHub returned an empty APK")
+            val totalBytes = body.contentLength()
+            var downloadedBytes = 0L
+            val buffer = ByteArray(64 * 1024)
+            body.byteStream().use { input ->
+                apkFile.outputStream().buffered().use { output ->
+                    onProgress(0L, totalBytes)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        downloadedBytes += count
+                        onProgress(downloadedBytes, totalBytes)
+                    }
+                    output.flush()
+                }
+            }
+            if (totalBytes > 0L && downloadedBytes != totalBytes) error("APK download incomplete: received $downloadedBytes of $totalBytes bytes")
+        }
         val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
         val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(install)
