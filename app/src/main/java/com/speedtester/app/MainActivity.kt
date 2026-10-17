@@ -813,11 +813,12 @@ private fun ServerMapView(
                 val preferences = viewContext.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
                 Configuration.getInstance().load(viewContext, preferences)
                 // OSM tile servers need a descriptive User-Agent rather than a generic package name.
-                Configuration.getInstance().userAgentValue = "SpeedTester/4.4 (Android; com.speedtester.app)"
+                Configuration.getInstance().userAgentValue = "com.speedtester.app"
                 MapView(viewContext).apply {
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
                     setBuiltInZoomControls(false)
+                    setUseDataConnection(true)
                     controller.setZoom(8.0)
                     controller.setCenter(GeoPoint(originLat, originLon))
                     tag = Pair("Standard", "")
@@ -871,6 +872,36 @@ private fun ServerMapView(
                         }
                     }
                     map.tag = Pair(tileStyle, overlayKey)
+                    // Frame the origin and server pins when data changes, so pins aren't
+                    // hidden outside the initial viewport.
+                    val framePoints = buildList {
+                        add(origin)
+                        servers.forEach { server ->
+                            val lat = server.latitude
+                            val lon = server.longitude
+                            if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                                add(GeoPoint(lat, lon))
+                            }
+                        }
+                    }
+                    if (framePoints.size > 1) {
+                        val north = framePoints.maxOf { it.latitude }
+                        val south = framePoints.minOf { it.latitude }
+                        val east = framePoints.maxOf { it.longitude }
+                        val west = framePoints.minOf { it.longitude }
+                        map.post {
+                            runCatching {
+                                map.zoomToBoundingBox(
+                                    org.osmdroid.util.BoundingBox(north, east, south, west),
+                                    true,
+                                    64
+                                )
+                            }
+                        }
+                    } else {
+                        map.controller.setCenter(origin)
+                        map.controller.setZoom(8.0)
+                    }
                     map.invalidate()
                 }
             }
@@ -945,6 +976,11 @@ private fun ServerMapView(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
+        // AndroidView can be created after Activity ON_RESUME has already fired.
+        // Sync the current state so osmdroid starts its tile requests immediately.
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            currentMapView?.onResume()
+        }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             currentMapView?.onPause()
