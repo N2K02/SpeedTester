@@ -945,6 +945,18 @@ private fun ServerMapView(
                         style = MaterialTheme.typography.labelMedium)
                 }
             }
+            TextButton(
+                onClick = {
+                    tileStyle = "Standard"
+                    mapView?.let { map ->
+                        map.setTileSource(openStreetMapTileSource())
+                        map.invalidate()
+                    }
+                },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+            ) {
+                Text("Reload", color = Teal, style = MaterialTheme.typography.labelMedium)
+            }
         }
 
         Column(
