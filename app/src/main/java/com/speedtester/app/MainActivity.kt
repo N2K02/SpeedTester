@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -646,35 +647,72 @@ private object ServerGeoLocator {
     InfoRow("Receiver-window limited", info.receiverLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
+// Neutral pseudo-origin: tile requests must not pretend to originate from the OSM website.
+private const val MAP_BASE_URL = "https://appassets.androidplatform.net/"
+
+private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Double): String {
+    fun asset(name: String): String = runCatching {
+        context.assets.open("leaflet/$name").bufferedReader().use { it.readText() }
+    }.getOrDefault("")
+    val css = asset("leaflet.css")
+    val js = asset("leaflet.js")
+    val script = """
+        (function () {
+          var msg = document.getElementById('msg');
+          function fail(text) { msg.textContent = text; msg.style.display = 'block'; }
+          if (typeof L === 'undefined') { fail('The map library could not be loaded.'); return; }
+          var map = L.map('map').setView([$latitude, $longitude], 5);
+          var loaded = 0, errors = 0;
+          var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: '&copy; OpenStreetMap contributors'
+          });
+          tiles.on('tileload', function () { loaded++; msg.style.display = 'none'; });
+          tiles.on('tileerror', function () {
+            errors++;
+            if (loaded === 0 && errors >= 3) fail('Map tiles could not be loaded. Check your internet connection.');
+          });
+          tiles.addTo(map);
+          L.circleMarker([$latitude, $longitude], {
+            radius: 9, color: '#EAF2F5', weight: 2,
+            fillColor: '#13B8A6', fillOpacity: 1
+          }).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();
+          setTimeout(function () { map.invalidateSize(); }, 300);
+          setTimeout(function () {
+            if (loaded === 0) fail('Map is taking too long to load. Check your internet connection and try again.');
+          }, 12000);
+        })();
+    """.trimIndent()
+    return "<!doctype html><html><head><meta charset=\"utf-8\">" +
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" +
+        "<style>" + css + "</style>" +
+        "<style>html,body{margin:0;height:100%;background:#0d151b}#map{width:100%;height:100%;background:#0d151b}" +
+        "#msg{display:block;position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);z-index:1000;text-align:center;color:#9fb0ba;font:14px sans-serif;pointer-events:none}</style>" +
+        "</head><body><div id=\"map\"></div><div id=\"msg\">Loading server map…</div><script>" + js + "</script><script>" + script + "</script></body></html>"
+}
+
 @Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
-    val mapUrl = remember(latitude, longitude) {
-        val west = (longitude - 1.5).coerceAtLeast(-180.0)
-        val east = (longitude + 1.5).coerceAtMost(180.0)
-        val south = (latitude - 0.8).coerceAtLeast(-85.0)
-        val north = (latitude + 0.8).coerceAtMost(85.0)
-        val box = listOf(west, south, east, north).joinToString("%2C") { "%.6f".format(java.util.Locale.US, it) }
-        "https://www.openstreetmap.org/export/embed.html?bbox=$box&layer=mapnik&marker=" +
-            "%.6f".format(java.util.Locale.US, latitude) + "%2C" +
-            "%.6f".format(java.util.Locale.US, longitude)
-    }
+    val appContext = LocalContext.current
+    val html = remember(latitude, longitude) { buildServerMapHtml(appContext, latitude, longitude) }
     AndroidView(modifier = modifier, factory = { context ->
         WebView(context).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#0D151B"))
             settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
+            settings.domStorageEnabled = false
             settings.loadsImagesAutomatically = true
             settings.blockNetworkImage = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0"
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
-            setBackgroundColor(android.graphics.Color.rgb(13, 21, 27))
             webViewClient = WebViewClient()
-            tag = mapUrl
-            loadUrl(mapUrl)
+            tag = html
+            loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
         }
     }, update = { view ->
-        if (view.tag != mapUrl) {
-            view.tag = mapUrl
-            view.loadUrl(mapUrl)
+        if (view.tag != html) {
+            view.tag = html
+            view.loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
         }
     })
 }
