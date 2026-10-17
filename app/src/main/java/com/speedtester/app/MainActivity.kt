@@ -119,7 +119,6 @@ private fun SpeedTesterApp(context: Context) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("━ Download", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall); Text("━ Upload", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall); Text("Live · Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
                                 Spacer(Modifier.height(12.dp))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    Metric("UPLOAD", if (upload > 0) String.format("%.1f", upload) else "—", "Mbps")
                                     Metric("PING", if (ping >= 0) ping.toString() else "—", "ms")
                                     Metric("JITTER", String.format("%.1f", jitter), "ms")
                                 }
