@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -626,22 +627,53 @@ private object ServerGeoLocator {
     InfoRow("Receiver-window limited", info.receiverLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
+// Neutral pseudo-origin used as the page's base URL. Do not use openstreetmap.org here: tile requests would then
+// claim to come from the OSM website, which the OSM tile servers reject.
+private const val MAP_BASE_URL = "https://appassets.androidplatform.net/"
+private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Double): String {
+    // Leaflet is bundled in assets/leaflet so the map no longer depends on a third-party CDN being reachable.
+    fun asset(name: String): String = runCatching { context.assets.open("leaflet/$name").bufferedReader().use { it.readText() } }.getOrDefault("")
+    val css = asset("leaflet.css")
+    val js = asset("leaflet.js")
+    val script = """
+        (function () {
+          var msg = document.getElementById('msg');
+          function fail(text) { msg.textContent = text; msg.style.display = 'block'; }
+          if (typeof L === 'undefined') { fail('The map library could not be loaded.'); return; }
+          var map = L.map('map').setView([$latitude, $longitude], 5);
+          var loaded = 0, errors = 0;
+          var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' });
+          tiles.on('tileload', function () { loaded++; msg.style.display = 'none'; });
+          tiles.on('tileerror', function () { errors++; if (loaded === 0 && errors >= 3) fail('Map tiles could not be loaded. Check your internet connection.'); });
+          tiles.addTo(map);
+          L.circleMarker([$latitude, $longitude], { radius: 9, color: '#EAF2F5', weight: 2, fillColor: '#13B8A6', fillOpacity: 1 }).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();
+          setTimeout(function () { map.invalidateSize(); }, 300);
+        })();
+    """.trimIndent()
+    return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" +
+        "<style>" + css + "</style>" +
+        "<style>html,body{margin:0;height:100%;background:#0d151b}#map{width:100%;height:100%;background:#0d151b}" +
+        "#msg{display:none;position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);z-index:1000;text-align:center;color:#9fb0ba;font:14px sans-serif}</style>" +
+        "</head><body><div id=\"map\"></div><div id=\"msg\"></div><script>" + js + "</script><script>" + script + "</script></body></html>"
+}
 @Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
-    val html = remember(latitude, longitude) {
-        """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head><body style="margin:0;background:#0d151b"><div id="map" style="width:100%;height:100vh"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map').setView([$latitude,$longitude],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);L.marker([$latitude,$longitude]).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();</script></body></html>"""
-    }
+    val appContext = LocalContext.current
+    val html = remember(latitude, longitude) { buildServerMapHtml(appContext, latitude, longitude) }
     AndroidView(modifier = modifier, factory = { context ->
         WebView(context).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#0D151B"))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = false
+            // OpenStreetMap's tile policy requires requests to identify the app.
+            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0"
             webViewClient = WebViewClient()
             tag = html
-            loadDataWithBaseURL("https://www.openstreetmap.org/", html, "text/html", "UTF-8", null)
+            loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
         }
     }, update = { view ->
         if (view.tag != html) {
             view.tag = html
-            view.loadDataWithBaseURL("https://www.openstreetmap.org/", html, "text/html", "UTF-8", null)
+            view.loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
         }
     })
 }
