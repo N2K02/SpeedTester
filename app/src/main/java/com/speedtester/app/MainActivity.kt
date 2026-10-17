@@ -289,7 +289,10 @@ private fun SpeedTesterApp(context: Context) {
                                 context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/csv").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Export history"))
                             }) { Text("Export CSV") }
                             Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = { history.clear(); prefs.edit().putString("history", "[]").apply() }) { Text("Clear history") }
+                            OutlinedButton(onClick = {
+                                history.clear()
+                                prefs.edit().putString("history", "[]").apply()
+                            }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear all history") }
                         }
                     }
                     if (history.isEmpty()) item { Text("Your completed tests will appear here.", color = Muted) }
@@ -302,7 +305,20 @@ private fun SpeedTesterApp(context: Context) {
                                 Text("Ping " + item.ping + " ms  ·  Jitter %.1f ms".format(item.jitter), color = Muted, style = MaterialTheme.typography.bodySmall)
                                 Text("Avg / peak ↓ %.1f / %.1f · ↑ %.1f / %.1f Mbps".format(item.downloadAverage, item.downloadPeak, item.uploadAverage, item.uploadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
                                 Text("Loaded ping " + (if (item.loadedPing >= 0) "${item.loadedPing} ms" else "—") + " · Failed probes ${item.failedProbes}/${item.probeCount}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                Row { Spacer(Modifier.weight(1f)); TextButton(onClick = { shareTestResult(context, item) }) { Text("Share result") } }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { shareTestResult(context, item) }) { Text("Share result") }
+                                    Spacer(Modifier.weight(1f))
+                                    TextButton(onClick = {
+                                        history.remove(item)
+                                        val updatedHistory = org.json.JSONArray()
+                                        history.forEach { x -> updatedHistory.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)) }
+                                        prefs.edit().putString("history", updatedHistory.toString()).apply()
+                                    }) {
+                                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
                             }
                         }
                     }
