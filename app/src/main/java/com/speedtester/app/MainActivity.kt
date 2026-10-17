@@ -822,6 +822,7 @@ private fun distanceKmFromMauritius(lat: Double?, lon: Double?): Double? {
 private object SpeedEngine {
     private const val SERVERS_URL = "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=1000"
     private const val TEST_SECONDS = 8L
+    private val discoveryClient = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).callTimeout(5, TimeUnit.SECONDS).build()
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -832,12 +833,12 @@ private object SpeedEngine {
 
     suspend fun discoverCandidates(): List<NdtServerCandidate> = withContext(Dispatchers.IO) {
         // Search terms improve coverage, but the local country-code check is authoritative.
-        val searches = listOf("Mauritius", "Port Louis", "my.t", "Mauritius Telecom", "Emtel", "CHiLi", "4342", "18685", "30612")
+        val searches = listOf("Mauritius", "my.t", "Mauritius Telecom", "Emtel", "CHiLi", "4342", "18685", "30612")
         val found = linkedMapOf<String, NdtServerCandidate>()
         for (term in searches) {
             try {
                 val url = SERVERS_URL + "&search=" + java.net.URLEncoder.encode(term, "UTF-8")
-                val jsonText = client.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
+                val jsonText = discoveryClient.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
                     if (!response.isSuccessful) return@use "[]"
                     response.body?.string() ?: "[]"
                 }
