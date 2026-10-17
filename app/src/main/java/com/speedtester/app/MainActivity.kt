@@ -58,6 +58,8 @@ import java.net.URL
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
+private fun Double.finiteOrZero(): Double = if (isFinite()) this else 0.0
+
 private val Teal = Color(0xFF13B8A6)
 private val Muted = Color(0xFF8A9AA5)
 data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0)
@@ -125,7 +127,7 @@ private fun SpeedTesterApp(context: Context) {
             val arr = org.json.JSONArray(prefs.getString("history", "[]"))
             (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
-                TestResult(o.optString("date"), o.optDouble("download"), o.optDouble("upload"), o.optLong("ping", -1), o.optDouble("jitter"), o.optString("server"), o.optDouble("downloadAverage"), o.optDouble("downloadPeak"), o.optDouble("uploadAverage"), o.optDouble("uploadPeak"), o.optLong("loadedPing", -1), o.optDouble("loadedJitter"), o.optInt("failedProbes"), o.optInt("probeCount"))
+                TestResult(o.optString("date"), o.optDouble("download"), o.optDouble("upload"), o.optLong("ping", -1), o.optDouble("jitter"), o.optString("server"), o.optDouble("downloadAverage", 0.0).finiteOrZero(), o.optDouble("downloadPeak", 0.0).finiteOrZero(), o.optDouble("uploadAverage", 0.0).finiteOrZero(), o.optDouble("uploadPeak", 0.0).finiteOrZero(), o.optLong("loadedPing", -1), o.optDouble("loadedJitter", 0.0).finiteOrZero(), o.optInt("failedProbes"), o.optInt("probeCount"))
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
@@ -205,7 +207,7 @@ private fun SpeedTesterApp(context: Context) {
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount)
                                                 history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
                                                 val arr = org.json.JSONArray()
-                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download).put("upload", x.upload).put("ping", x.ping).put("jitter", x.jitter).put("server", x.server).put("downloadAverage", x.downloadAverage).put("downloadPeak", x.downloadPeak).put("uploadAverage", x.uploadAverage).put("uploadPeak", x.uploadPeak).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)) }
+                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)) }
                                                 prefs.edit().putString("history", arr.toString()).apply(); logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
                                             } catch (e: Exception) { logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
@@ -249,7 +251,7 @@ private fun SpeedTesterApp(context: Context) {
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text("Detailed diagnostic log", fontWeight = FontWeight.SemiBold)
-                                        Text("${diagnosticLog.size} entries · keeps latest 500", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${diagnosticLog.size} entries · keeps latest 500 · shows latest 30", color = Muted, style = MaterialTheme.typography.labelSmall)
                                     }
                                     IconButton(onClick = { diagnosticLogExpanded = !diagnosticLogExpanded }) {
                                         Icon(if (diagnosticLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (diagnosticLogExpanded) "Collapse diagnostic log" else "Expand diagnostic log", tint = Teal)
@@ -263,9 +265,9 @@ private fun SpeedTesterApp(context: Context) {
                                         }) { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Copy") }
                                         TextButton(onClick = { diagnosticLog.clear() }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear") }
                                     }
-                                    Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         if (diagnosticLog.isEmpty()) Text("Log is empty. Start a test to capture detailed diagnostics.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                        diagnosticLog.takeLast(8).forEach { line ->
+                                        diagnosticLog.takeLast(30).forEach { line ->
                                             Text(line, color = if (line.contains("FATAL") || line.contains("HTTP 4") || line.contains("ERROR")) MaterialTheme.colorScheme.error else Muted, style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
