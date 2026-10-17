@@ -582,7 +582,7 @@ private fun SpeedTesterApp(context: Context) {
                                     Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                     val mapped = serversWithDistance.filter { it.latitude != null && it.longitude != null }
                                     if (mapped.isNotEmpty()) {
-                                        ServerMapLibreView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(320.dp))
+                                        ServerMapView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(320.dp))
                                         Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = Muted, style = MaterialTheme.typography.labelSmall)
                                     } else {
                                         Box(Modifier.fillMaxWidth().height(180.dp).background(Color(0xFF0D151B), RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
@@ -784,7 +784,7 @@ private object ServerGeoLocator {
  * OpenGL renderer, which was crashing on some Android 17 devices.
  */
 @Composable
-private fun ServerMapLibreView(
+private fun ServerMapView(
     servers: List<NdtServerCandidate>,
     originLat: Double,
     originLon: Double,
