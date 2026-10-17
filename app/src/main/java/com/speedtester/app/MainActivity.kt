@@ -818,22 +818,24 @@ private fun ServerMapView(
                     setBuiltInZoomControls(false)
                     controller.setZoom(8.0)
                     controller.setCenter(GeoPoint(originLat, originLon))
-                    tag = "Standard"
+                    tag = Pair("Standard", "")
                     mapView = this
                 }
             },
             update = { map ->
-                if (map.tag != tileStyle) {
+                val previousTag = map.tag as? Pair<*, *>
+                if (previousTag?.first != tileStyle) {
                     val source = when (tileStyle) {
                         "Topographic" -> TileSourceFactory.USGS_TOPO
                         "Cycle" -> TileSourceFactory.CYCLE
                         else -> TileSourceFactory.MAPNIK
                     }
                     map.setTileSource(source)
-                    map.tag = tileStyle
+                    map.tag = Pair(tileStyle, previousTag?.second as? String ?: "")
                     map.invalidate()
                 }
-                if (map.getTag(R.id.map_overlay_key) != overlayKey) {
+                val currentTag = map.tag as? Pair<*, *>
+                if (currentTag?.second != overlayKey) {
                     map.overlays.clear()
                     val origin = GeoPoint(originLat, originLon)
                     map.overlays.add(Marker(map).apply {
@@ -858,7 +860,7 @@ private fun ServerMapView(
                             })
                         }
                     }
-                    map.setTag(R.id.map_overlay_key, overlayKey)
+                    map.tag = Pair(tileStyle, overlayKey)
                     map.invalidate()
                 }
             }
