@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.provider.Settings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.ui.viewinterop.AndroidView
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -98,6 +101,7 @@ private fun SpeedTesterApp(context: Context) {
     val diagnosticLog = remember { mutableStateListOf<String>() }
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
+    var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
     var loggedPhase by remember { mutableStateOf("") }
     var livePing by remember { mutableLongStateOf(-1L) }
     var liveJitter by remember { mutableDoubleStateOf(0.0) }
@@ -128,8 +132,9 @@ private fun SpeedTesterApp(context: Context) {
                 NavigationBar(containerColor = Color(0xFF101820)) {
                     NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
                     NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
-                    NavigationBarItem(selected = activeTab == 2, onClick = { activeTab = 2 }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
-                    NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
+                    NavigationBarItem(selected = activeTab == 2, onClick = { activeTab = 2 }, icon = { Icon(Icons.Default.Bolt, null) }, label = { Text("Server") })
+                    NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
+                    NavigationBarItem(selected = activeTab == 4, onClick = { activeTab = 4 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
                 }
             }, containerColor = Color(0xFF0B1117)
         ) { padding ->
@@ -170,7 +175,16 @@ private fun SpeedTesterApp(context: Context) {
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
                                         scope.launch {
                                             try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value, mbps ->
+                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { server ->
+                                                    scope.launch {
+                                                        serverDetails = server
+                                                        prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
+                                                        val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(server.city, server.country) }
+                                                        val mapped = server.copy(latitude = coords?.first, longitude = coords?.second)
+                                                        serverDetails = mapped
+                                                        prefs.edit().putString("server_lat", mapped.latitude?.toString()).putString("server_lon", mapped.longitude?.toString()).apply()
+                                                    }
+                                                }, { phase, value, mbps ->
                                                     status = phase; progress = value
                                                     if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
@@ -178,7 +192,7 @@ private fun SpeedTesterApp(context: Context) {
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
                                                 loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount)
                                                 history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
                                                 val arr = org.json.JSONArray()
                                                 history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download).put("upload", x.upload).put("ping", x.ping).put("jitter", x.jitter).put("server", x.server).put("downloadAverage", x.downloadAverage).put("downloadPeak", x.downloadPeak).put("uploadAverage", x.uploadAverage).put("uploadPeak", x.uploadPeak).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)) }
@@ -209,8 +223,9 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                InfoRow("Test server", runCatching { URL(endpoint).host }.getOrDefault("Invalid URL"))
-                                 InfoRow("Protocol", runCatching { URL(endpoint).protocol.uppercase(java.util.Locale.ROOT) }.getOrDefault("—"))
+                                InfoRow("Test server", serverDetails.host.ifBlank { "Not selected yet" })
+                                InfoRow("Server location", serverDetails.location.ifBlank { "Not available yet" })
+                                InfoRow("Protocol", "M-Lab NDT7 · secure WebSocket")
                                  InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
                                 InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Signal quality", netInfo.quality); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency / band", netInfo.frequency); InfoRow("Connection note", netInfo.note)
                             }
@@ -281,6 +296,41 @@ private fun SpeedTesterApp(context: Context) {
                     }
                 }
                 2 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item { Text("Server map", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Bolt, null, tint = Teal, modifier = Modifier.size(26.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Connected M-Lab server", fontWeight = FontWeight.Bold)
+                                        Text(serverDetails.location.ifBlank { "Run a speed test to discover a server" }, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                if (serverDetails.latitude != null && serverDetails.longitude != null) {
+                                    ServerMapWebView(serverDetails.latitude!!, serverDetails.longitude!!, Modifier.fillMaxWidth().height(280.dp))
+                                    Text("Marker shows the approximate city location, not the exact physical server.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                } else {
+                                    Box(Modifier.fillMaxWidth().height(180.dp).background(Color(0xFF0D151B), RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
+                                        Text(if (serverDetails.host.isBlank()) "The map appears after your first successful server discovery." else "Map coordinates are not available yet. Connect to the internet and run a test to look up the server city.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                InfoRow("Server hostname", serverDetails.host.ifBlank { "—" })
+                                InfoRow("City / country", serverDetails.location.ifBlank { "—" })
+                                InfoRow("Test protocol", "M-Lab NDT7 over WSS")
+                                InfoRow("Download", "%.1f Mbps".format(java.util.Locale.US, download))
+                                InfoRow("Upload", "%.1f Mbps".format(java.util.Locale.US, upload))
+                                InfoRow("Idle TCP latency", if (ping >= 0) "$ping ms" else "—")
+                                InfoRow("Jitter", if (ping >= 0) "%.1f ms".format(java.util.Locale.US, jitter) else "—")
+                                InfoRow("Network", netInfo.type)
+                                Text("M-Lab chooses an available nearby server automatically. Server city coordinates are approximate; map tiles are provided by OpenStreetMap.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+                3 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
                     item { Text("M-Lab NDT7 server discovery URL", color = Muted) }
                     item { OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Server URL") }) }
@@ -413,6 +463,47 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val note = when { !isWifi -> "Wi-Fi is not the active network"; !hasWifiInfo -> "Android did not expose Wi-Fi RSSI"; else -> "RSSI is an Android-reported estimate and may fluctuate" }
     return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note)
 }
+private data class ServerDetails(val host: String, val city: String, val country: String, val latitude: Double? = null, val longitude: Double? = null) {
+    val location: String get() = listOf(city, country).filter { it.isNotBlank() && it != "null" }.joinToString(", ")
+}
+private object ServerGeoLocator {
+    private val client = OkHttpClient.Builder().callTimeout(8, TimeUnit.SECONDS).build()
+    fun locate(city: String, country: String): Pair<Double, Double>? {
+        if (city.isBlank() || country.isBlank()) return null
+        return runCatching {
+            val query = java.net.URLEncoder.encode("$city, $country", "UTF-8")
+            val request = Request.Builder().url("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=$query").header("User-Agent", "SpeedTester-Android/1.0").header("Accept", "application/json").build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val results = org.json.JSONArray(response.body?.string() ?: "[]")
+                if (results.length() == 0) return null
+                val item = results.getJSONObject(0)
+                val lat = item.optString("lat").toDoubleOrNull() ?: return null
+                val lon = item.optString("lon").toDoubleOrNull() ?: return null
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) null else lat to lon
+            }
+        }.getOrNull()
+    }
+}
+@Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
+    val html = remember(latitude, longitude) {
+        """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head><body style="margin:0;background:#0d151b"><div id="map" style="width:100%;height:100vh"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map').setView([$latitude,$longitude],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);L.marker([$latitude,$longitude]).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();</script></body></html>"""
+    }
+    AndroidView(modifier = modifier, factory = { context ->
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = false
+            webViewClient = WebViewClient()
+            tag = html
+            loadDataWithBaseURL("https://www.openstreetmap.org/", html, "text/html", "UTF-8", null)
+        }
+    }, update = { view ->
+        if (view.tag != html) {
+            view.tag = html
+            view.loadDataWithBaseURL("https://www.openstreetmap.org/", html, "text/html", "UTF-8", null)
+        }
+    })
+}
 private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int)
 private data class NdtMeasurement(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val elapsedSeconds: Double)
 private object SpeedEngine {
@@ -421,7 +512,7 @@ private object SpeedEngine {
     private const val TEST_SECONDS = 10.0
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(0, TimeUnit.MILLISECONDS).build()
 
-    suspend fun run(base: String, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+    suspend fun run(base: String, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
         val locateUrl = if (base.contains("locate.measurementlab.net", true)) base else LOCATE_URL
         onLog("Engine: M-Lab NDT7 over secure WebSockets")
         onLog("Discovery URL: " + locateUrl)
@@ -435,6 +526,8 @@ private object SpeedEngine {
         var downUrl = ""
         var upUrl = ""
         var locationName = "location unavailable"
+        var locationCity = ""
+        var locationCountry = ""
         for (i in 0 until results.length()) {
             val result = results.optJSONObject(i) ?: continue
             val urls = result.optJSONObject("urls") ?: continue
@@ -450,7 +543,9 @@ private object SpeedEngine {
                 downUrl = d
                 upUrl = u
                 val loc = result.optJSONObject("location")
-                locationName = listOf(loc?.optString("city").orEmpty(), loc?.optString("country").orEmpty()).filter { it.isNotBlank() && it != "null" }.joinToString(", ").ifBlank { locationName }
+                locationCity = loc?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
+                locationCountry = loc?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
+                locationName = listOf(locationCity, locationCountry).filter { it.isNotBlank() }.joinToString(", ").ifBlank { locationName }
                 break
             }
         }
@@ -459,6 +554,7 @@ private object SpeedEngine {
         val host = uri.host ?: error("M-Lab returned an invalid server URL")
         val port = if (uri.port > 0) uri.port else 443
         onLog("Selected server: " + host + " (" + locationName + ")")
+        onServer(ServerDetails(host, locationCity, locationCountry))
         onLog("Download URL: " + downUrl)
         onLog("Upload URL: " + upUrl)
         onLog("Download and upload each run for up to 10 seconds")
