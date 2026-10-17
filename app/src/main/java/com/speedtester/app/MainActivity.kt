@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
 private fun SpeedTesterApp(context: Context) {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("speedtester", Context.MODE_PRIVATE) }
-    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "https://librespeed.org/speedtest/backend") ?: "") }
+    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "https://speed.cloudflare.com") ?: "") }
     var testing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready to test") }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -181,7 +181,7 @@ private fun SpeedTesterApp(context: Context) {
                             if (valid) { prefs.edit().putString("endpoint", endpoint.trim().trimEnd('/')).apply(); updateMessage = "Server saved" } else updateMessage = "Enter a valid HTTP(S) URL"
                         }) { Text("Save server") }
                     }
-                    item { Text("Choose https://speed.cloudflare.com for Cloudflare's public download/upload endpoints, or use a LibreSpeed-compatible backend URL containing empty.php and garbage.php. Other providers need a documented endpoint or compatible server; arbitrary speed-test sites cannot safely be treated as interchangeable.", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                    item { Text("Default: Cloudflare public speed-test endpoint. For LibreSpeed, enter the backend directory URL containing garbage.php and empty.php, for example https://your-server.example/backend. Other providers need documented compatible endpoints.", color = Muted, style = MaterialTheme.typography.bodySmall) }
                     item { Text("Data usage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     item { Text("A full test transfers several megabytes. Tests run only on demand; no background speed testing.", color = Muted) }
                     item { Text("Updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
@@ -247,7 +247,7 @@ private object SpeedEngine {
         val jitter = if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
         onUpdate("Downloading", .08f, 0f)
         val cloudflare = URL(base).host.equals("speed.cloudflare.com", ignoreCase = true)
-        val downloadUrl = if (cloudflare) base + "/__down?bytes=8000000&nocache=" + System.nanoTime() else base + "/empty.php?cors=true&size=8000000&nocache=" + System.nanoTime()
+        val downloadUrl = if (cloudflare) base + "/__down?bytes=8000000&nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&ckSize=8&nocache=" + System.nanoTime()
         val request = Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").build()
         val started = System.nanoTime(); var bytes = 0L
         client.newCall(request).execute().use { response ->
@@ -264,7 +264,7 @@ private object SpeedEngine {
         val downloadMbps = bytes * 8.0 / ((System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
         onUpdate("Uploading", .55f, 0f)
         val payload = ByteArray(2_000_000); java.security.SecureRandom().nextBytes(payload)
-        val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&nocache=" + System.nanoTime()
+        val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/empty.php?cors=true&nocache=" + System.nanoTime()
         val uploadRequest = Request.Builder().url(uploadUrl).post(payload.toRequestBody(null)).header("Cache-Control", "no-cache").build()
         val uploadStart = System.nanoTime()
         client.newCall(uploadRequest).execute().use { response -> check(response.isSuccessful) { "Upload failed: HTTP " + response.code + ". Check server upload support." } }
