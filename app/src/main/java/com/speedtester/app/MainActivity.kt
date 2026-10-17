@@ -443,8 +443,8 @@ private object SpeedEngine {
             val keys = urls.keys()
             while (keys.hasNext()) {
                 val key = keys.next()
-                if (key.contains("ndt/v7/download")) d = urls.optString(key)
-                if (key.contains("ndt/v7/upload")) u = urls.optString(key)
+                if (key.startsWith("wss://") && key.contains("ndt/v7/download")) d = urls.optString(key)
+                if (key.startsWith("wss://") && key.contains("ndt/v7/upload")) u = urls.optString(key)
             }
             if (d.startsWith("wss://") && u.startsWith("wss://")) {
                 downUrl = d
