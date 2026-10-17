@@ -353,7 +353,8 @@ private object UpdateChecker {
         }
         ReleaseInfo(tag, notes, apkUrl, available, message)
     } catch (e: Exception) { ReleaseInfo("", "", "", false, "Update check failed: " + (e.message ?: "network error")) }
-    fun downloadAndInstall(context: Context, apkUrl: String): String = try {
+    fun downloadAndInstall(context: Context, apkUrl: String): String {
+        return try {
         if (!context.packageManager.canRequestPackageInstalls()) {
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return "Allow installs from SpeedTester, then tap Download and install again."
@@ -367,7 +368,8 @@ private object UpdateChecker {
         val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(install)
         "APK downloaded. Android's installer is ready."
-    } catch (e: Exception) { "Update failed: " + (e.message ?: "network error") }
+        } catch (e: Exception) { "Update failed: " + (e.message ?: "network error") }
+    }
     private fun compareVersions(a: String, b: String): Int {
         val x = a.split(".").map { it.toIntOrNull() ?: 0 }; val y = b.split(".").map { it.toIntOrNull() ?: 0 }
         for (i in 0 until max(x.size, y.size)) { val d = (x.getOrNull(i) ?: 0).compareTo(y.getOrNull(i) ?: 0); if (d != 0) return d }
