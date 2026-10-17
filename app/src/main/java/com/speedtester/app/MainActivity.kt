@@ -77,6 +77,8 @@ private fun SpeedTesterApp(context: Context) {
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     var loggedPhase by remember { mutableStateOf("") }
+    var livePing by remember { mutableLongStateOf(-1L) }
+    var liveJitter by remember { mutableDoubleStateOf(0.0) }
     val downloadSamples = remember { mutableStateListOf<Float>() }
     val uploadSamples = remember { mutableStateListOf<Float>() }
     val history = remember {
@@ -111,29 +113,26 @@ private fun SpeedTesterApp(context: Context) {
                             Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(status, color = Muted, style = MaterialTheme.typography.labelLarge)
                                 Spacer(Modifier.height(8.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("↓ DOWNLOAD", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("↑ UPLOAD", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White); Text("↓ DOWNLOAD", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White); Text("↑ UPLOAD", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(if (livePing >= 0) livePing.toString() else if (ping >= 0) ping.toString() else "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("PING", color = Muted, style = MaterialTheme.typography.labelMedium); Text("ms", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", liveJitter.takeIf { it > 0 } ?: jitter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("JITTER", color = Muted, style = MaterialTheme.typography.labelMedium); Text("ms", color = Muted, style = MaterialTheme.typography.labelSmall) }
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.fillMaxWidth().height(170.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("━ Download", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall); Text("━ Upload", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall); Text("Live · Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
-                                Spacer(Modifier.height(12.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    Metric("PING", if (ping >= 0) ping.toString() else "—", "ms")
-                                    Metric("JITTER", String.format("%.1f", jitter), "ms")
-                                }
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; loggedPhase = ""; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Preparing server connection and TCP latency probes"); activityLog.add("Target: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                        testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Preparing server connection and TCP latency probes"); activityLog.add("Target: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                         scope.launch {
                                             try {
                                                 val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value, mbps ->
                                                     status = phase; progress = value
                                                     if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val target = if (phase.contains("Upload", true)) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
-                                                }, { p, j -> ping = p; jitter = j })
+                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint)
                                                 history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
@@ -294,21 +293,24 @@ private object SpeedEngine {
         require(base.startsWith("https://") || base.startsWith("http://")) { "Server URL must start with HTTP or HTTPS" }
         val parsed = URL(base); val host = parsed.host; val port = if (parsed.port > 0) parsed.port else if (base.startsWith("https")) 443 else 80
         val pings = mutableListOf<Long>()
-        repeat(5) {
+        repeat(10) {
             val start = System.nanoTime()
             Socket().use { it.connect(java.net.InetSocketAddress(host, port), 3000) }
             pings.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
             val avg = pings.average().toLong()
             val j = if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
             onMetrics(avg, j)
+            onUpdate("Measuring latency", (.02f + .06f * pings.size / 10f), 0f)
+            kotlinx.coroutines.delay(180)
         }
         val ping = pings.average().toLong()
         val jitter = if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
         onUpdate("Downloading", .08f, 0f)
+        kotlinx.coroutines.delay(350)
         val cloudflare = URL(base).host.equals("speed.cloudflare.com", ignoreCase = true)
         val downloadUrl = if (cloudflare) base + "/__down?bytes=8000000&nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&ckSize=8&nocache=" + System.nanoTime()
         val request = Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").build()
-        val started = System.nanoTime(); var bytes = 0L
+        val started = System.nanoTime(); var bytes = 0L; var lastReportNanos = started; var lastReportBytes = 0L
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Download failed: HTTP " + response.code + ". Check server URL." }
             val stream = response.body?.byteStream() ?: error("Empty download response"); val buffer = ByteArray(32 * 1024)
@@ -316,14 +318,20 @@ private object SpeedEngine {
                 val n = stream.read(buffer); if (n < 0) break; bytes += n
                 val fraction = (bytes.toDouble() / 8_000_000.0).coerceIn(0.0, 1.0)
                 val elapsed = (System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0
-                val liveMbps = (bytes * 8.0 / elapsed / 1_000_000.0).toFloat()
-                onUpdate("Downloading", (.08 + .42 * fraction).toFloat(), liveMbps)
+                val now = System.nanoTime()
+                if (now - lastReportNanos >= 200_000_000L || bytes >= 8_000_000L) {
+                    val windowSeconds = (now - lastReportNanos).coerceAtLeast(1) / 1_000_000_000.0
+                    val liveMbps = ((bytes - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).toFloat()
+                    onUpdate("Downloading", (.08 + .42 * fraction).toFloat(), liveMbps)
+                    lastReportNanos = now; lastReportBytes = bytes
+                }
             }
         }
         val downloadMbps = bytes * 8.0 / ((System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
         onUpdate("Uploading", .55f, 0f)
         val payload = ByteArray(2_000_000); java.security.SecureRandom().nextBytes(payload)
         val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/empty.php?cors=true&nocache=" + System.nanoTime()
+        kotlinx.coroutines.delay(350)
         val uploadStart = System.nanoTime()
         val uploadBody = object : okhttp3.RequestBody() {
             override fun contentType(): okhttp3.MediaType? = null
