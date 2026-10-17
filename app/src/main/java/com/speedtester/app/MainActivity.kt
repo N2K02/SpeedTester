@@ -674,8 +674,13 @@ private fun SpeedTesterApp(context: Context) {
                                                 }
                                             }
                                         }
-                                        updateMessage = result.message
-                                        updateDiagnostics = result.diagnostics
+                                        if (result.startsWith("Update failed:")) {
+                                            updateDiagnostics = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: APK download/install\nAPK URL: " + updateUrl + "\nError: " + result
+                                            updateMessage = "Update failed. Tap Show details for diagnostics."
+                                        } else {
+                                            updateMessage = result
+                                            if (result.startsWith("Allow installs")) updateDiagnostics = "App: SpeedTester\nStage: Install permission\nAPK URL: " + updateUrl + "\n" + result
+                                        }
                                         updateDiagnosticsVisible = false
                                         updateDownloading = false
                                     }
