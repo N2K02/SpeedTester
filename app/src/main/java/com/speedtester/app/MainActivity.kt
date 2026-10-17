@@ -76,6 +76,7 @@ private fun SpeedTesterApp(context: Context) {
     var updateAvailable by remember { mutableStateOf(false) }
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
+    var loggedPhase by remember { mutableStateOf("") }
     val downloadSamples = remember { mutableStateListOf<Float>() }
     val uploadSamples = remember { mutableStateListOf<Float>() }
     val history = remember {
@@ -125,12 +126,12 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Resolving host and checking TCP latency to " + endpoint.trim())
+                                        testing = true; error = null; progress = 0f; loggedPhase = ""; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Preparing server connection and TCP latency probes"); activityLog.add("Target: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                         scope.launch {
                                             try {
                                                 val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value, mbps ->
                                                     status = phase; progress = value
-                                                    if (activityLog.lastOrNull() != phase + " phase started") { activityLog.add(phase + " phase started"); if (activityLog.size > 8) activityLog.removeAt(0) }
+                                                    if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val target = if (phase.contains("Upload", true)) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { p, j -> ping = p; jitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
