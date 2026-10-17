@@ -1,7 +1,11 @@
 package com.speedtester.app
 
+import android.Manifest
 import android.content.Context
 import android.content.ClipData
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.content.ClipboardManager
 import android.provider.Settings
 import android.webkit.WebView
@@ -13,6 +17,9 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -94,6 +101,13 @@ private fun SpeedTesterApp(context: Context) {
     var serverDiscoveryStatus by remember { mutableStateOf("Not started") }
     var serverSearch by remember { mutableStateOf("") }
     var serverPage by remember { mutableIntStateOf(0) }
+    var distanceOrigin by remember { mutableStateOf(-20.2 to 57.5) }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val location = getLastKnownLocation(context)
+            if (location != null) distanceOrigin = location.latitude to location.longitude
+        }
+    }
     LaunchedEffect(Unit) {
         serversLoading = true
         serversError = ""
@@ -112,11 +126,17 @@ private fun SpeedTesterApp(context: Context) {
             serverDiscoveryStatus = "Failed"
         } finally { serversLoading = false }
     }
-    val filteredServers = remember(availableServers, serverSearch) {
-        availableServers.filter { candidate ->
+    val serversWithDistance = remember(availableServers, distanceOrigin) {
+        availableServers.map { candidate ->
+            val km = distanceKmBetween(distanceOrigin.first, distanceOrigin.second, candidate.latitude, candidate.longitude)
+            candidate.copy(distanceKm = km)
+        }
+    }
+    val filteredServers = remember(serversWithDistance, serverSearch) {
+        serversWithDistance.filter { candidate ->
             candidate.country.equals("MU", true) &&
             (serverSearch.isBlank() || listOf(candidate.host, candidate.city, candidate.countryName, candidate.label).any { it.contains(serverSearch.trim(), true) })
-        }.sortedWith(compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.host })
+        }.sortedWith(compareBy<NdtServerCandidate> { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.host })
     }
     val serverPageSize = 3
     val serverPageCount = maxOf(1, (filteredServers.size + serverPageSize - 1) / serverPageSize)
@@ -203,7 +223,20 @@ private fun SpeedTesterApp(context: Context) {
                 NavigationBar(containerColor = Color(0xFF101820)) {
                     NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
                     NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
-                    NavigationBarItem(selected = activeTab == 2, onClick = { activeTab = 2 }, icon = { Icon(Icons.Default.Bolt, null) }, label = { Text("Server") })
+                    NavigationBarItem(
+                        selected = activeTab == 2,
+                        onClick = {
+                            if (!serversLoading && availableServers.isNotEmpty()) {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                    getLastKnownLocation(context)?.let { distanceOrigin = it.latitude to it.longitude }
+                                } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                                activeTab = 2
+                            }
+                        },
+                        enabled = !serversLoading && availableServers.isNotEmpty(),
+                        icon = { Icon(Icons.Default.Bolt, null) },
+                        label = { Text("Server") }
+                    )
                     NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
                 }
             }, containerColor = Color(0xFF0B1117)
@@ -239,7 +272,7 @@ private fun SpeedTesterApp(context: Context) {
                                         }
                                     }, enabled = !serversLoading && !testing) { Text("Refresh") }
                                 }
-                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ranked by measured TCP latency. Provider names come from the server directory.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ordered nearest to your last known location. If location is unavailable, distances use a Mauritius reference point.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search provider, city, server ID") }, placeholder = { Text("e.g. my.t, Emtel, 4342") })
                                 Text("${filteredServers.size} HTTPS-compatible Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding Mauritius Ookla servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
@@ -260,7 +293,8 @@ private fun SpeedTesterApp(context: Context) {
                                                 Text(candidate.label, color = Color.White, fontWeight = FontWeight.SemiBold)
                                                 Text(candidate.host, color = Muted, style = MaterialTheme.typography.labelSmall)
                                                 Text(listOf(candidate.city, candidate.countryName).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Location not provided" }, color = Muted, style = MaterialTheme.typography.bodySmall)
-                                                Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                                Text("Distance: ${candidate.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                                Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }}", color = Muted, style = MaterialTheme.typography.labelSmall)
                                             }
                                             if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = Teal)
                                         }
@@ -520,6 +554,59 @@ private fun SpeedTesterApp(context: Context) {
                 }
                 2 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { Text("Server map", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+                    if (serversLoading || serverDiscoveryMs < 0L || availableServers.isEmpty()) {
+                        item {
+                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    if (serversLoading || serverDiscoveryMs < 0L) CircularProgressIndicator(color = Teal)
+                                    Text(
+                                        when {
+                                            serversLoading || serverDiscoveryMs < 0L -> "Server map is disabled until discovery finishes."
+                                            else -> "No Mauritius servers are available to plot. Refresh discovery on the Test page."
+                                        },
+                                        color = Muted, style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        item {
+                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("Mauritius test servers", fontWeight = FontWeight.Bold)
+                                    Text("${filteredServers.count { it.latitude != null && it.longitude != null }} of ${filteredServers.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    val mapped = filteredServers.filter { it.latitude != null && it.longitude != null }
+                                    if (mapped.isNotEmpty()) {
+                                        ServerMapWebView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(320.dp))
+                                        Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    } else {
+                                        Box(Modifier.fillMaxWidth().height(180.dp).background(Color(0xFF0D151B), RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
+                                            Text("The discovered server directory did not provide coordinates for these servers.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Servers · nearest first", fontWeight = FontWeight.Bold)
+                                    filteredServers.forEachIndexed { index, server ->
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text("${index + 1}.", color = Teal, fontWeight = FontWeight.Bold)
+                                            Column(Modifier.weight(1f)) {
+                                                Text(server.label, fontWeight = FontWeight.SemiBold)
+                                                Text(server.city.ifBlank { server.host }, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            Text(server.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "— km", color = Teal, style = MaterialTheme.typography.labelMedium)
+                                        }
+                                        if (index < filteredServers.lastIndex) HorizontalDivider(color = Color(0xFF26343E))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -764,40 +851,59 @@ private object ServerGeoLocator {
 // Neutral pseudo-origin: tile requests must not pretend to originate from the OSM website.
 private const val MAP_BASE_URL = "https://appassets.androidplatform.net/"
 
-private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Double): String {
+private fun buildServerMapHtml(context: Context, servers: List<NdtServerCandidate>, originLat: Double, originLon: Double): String {
     fun asset(name: String): String = runCatching {
         context.assets.open("leaflet/$name").bufferedReader().use { it.readText() }
     }.getOrDefault("")
     val css = asset("leaflet.css")
     val js = asset("leaflet.js")
+    val markers = JSONArray()
+    servers.forEach { server ->
+        val lat = server.latitude ?: return@forEach
+        val lon = server.longitude ?: return@forEach
+        markers.put(JSONObject().put("lat", lat).put("lon", lon)
+            .put("label", server.label).put("city", server.city)
+            .put("host", server.host).put("distance", server.distanceKm ?: JSONObject.NULL)
+            .put("ping", server.latencyMs ?: JSONObject.NULL))
+    }
+    val markerJson = markers.toString()
     val script = """
         (function () {
           var msg = document.getElementById('msg');
           function fail(text) { msg.textContent = text; msg.style.display = 'block'; }
-          if (typeof L === 'undefined') { fail('The map library could not be loaded.'); return; }
-          var map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([$latitude, $longitude], 8);
-          var loaded = 0, errors = 0;
+          if (typeof L === 'undefined') { fail('The bundled map library could not be loaded.'); return; }
+          var points = $markerJson;
+          var map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([$originLat, $originLon], 8);
+          var loaded = 0, errors = 0, bounds = [];
           var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            minZoom: 2,
-            maxZoom: 19,
+            minZoom: 2, maxZoom: 19,
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             referrerPolicy: 'strict-origin-when-cross-origin'
           });
           tiles.on('tileload', function () { loaded++; msg.style.display = 'none'; });
           tiles.on('tileerror', function () {
             errors++;
-            if (loaded === 0 && errors >= 3) fail('Map tiles were blocked or unavailable. Check your connection or tile access.');
+            if (loaded === 0 && errors >= 3) fail('Map tiles could not load. Server list and distances are still available below.');
           });
           tiles.addTo(map);
-          L.circleMarker([$latitude, $longitude], {
-            radius: 9, color: '#EAF2F5', weight: 2,
-            fillColor: '#13B8A6', fillOpacity: 1
-          }).addTo(map).bindPopup('Mauritius Ookla-compatible test server').openPopup();
+          points.forEach(function (p, i) {
+            var marker = L.circleMarker([p.lat, p.lon], {
+              radius: 7, color: '#EAF2F5', weight: 1.5,
+              fillColor: '#13B8A6', fillOpacity: 0.95
+            }).addTo(map);
+            var distance = p.distance === null ? 'Distance unavailable' : Number(p.distance).toFixed(1) + ' km away';
+            var ping = p.ping === null ? 'TCP ping unavailable' : p.ping + ' ms TCP ping';
+            marker.bindPopup('<b>' + (i + 1) + '. ' + escapeHtml(p.label) + '</b><br>' + escapeHtml(p.city) + '<br>' + distance + '<br>' + ping + '<br><small>' + escapeHtml(p.host) + '</small>');
+            bounds.push([p.lat, p.lon]);
+          });
+          L.circleMarker([$originLat, $originLon], {radius:5,color:'#FFFFFF',weight:2,fillColor:'#4A90E2',fillOpacity:1})
+            .addTo(map).bindPopup('Distance reference location');
+          bounds.push([$originLat, $originLon]);
+          function escapeHtml(s) { return String(s || '').replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+          if (bounds.length > 1) map.fitBounds(bounds, {padding:[18,18], maxZoom:10});
           setTimeout(function () { map.invalidateSize(true); }, 300);
           window.addEventListener('resize', function () { map.invalidateSize(true); });
-          setTimeout(function () {
-            if (loaded === 0) fail('No map tiles received. The server marker is approximate; try again later.');
-          }, 10000);
+          setTimeout(function () { if (loaded === 0) fail('No map tiles received. The server list and distances remain available below.'); }, 10000);
         })();
     """.trimIndent()
     return "<!doctype html><html><head><meta charset=\"utf-8\">" +
@@ -805,9 +911,34 @@ private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Do
         "<style>" + css + "</style>" +
         "<style>html,body{margin:0;height:100%;background:#0d151b}#map{width:100%;height:100%;background:#0d151b}" +
         "#msg{display:block;position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);z-index:1000;text-align:center;color:#9fb0ba;font:14px sans-serif;pointer-events:none}</style>" +
-        "</head><body><div id=\"map\"></div><div id=\"msg\">Loading server map…</div><script>" + js + "</script><script>" + script + "</script></body></html>"
+        "</head><body><div id=\"map\"></div><div id=\"msg\">Loading Mauritius server map…</div><script>" + js + "</script><script>" + script + "</script></body></html>"
 }
 
+@Composable private fun ServerMapWebView(servers: List<NdtServerCandidate>, originLat: Double, originLon: Double, modifier: Modifier = Modifier) {
+    val appContext = LocalContext.current
+    val html = remember(servers, originLat, originLon) { buildServerMapHtml(appContext, servers, originLat, originLon) }
+    AndroidView(modifier = modifier, factory = { context ->
+        WebView(context).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#0D151B"))
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = false
+            settings.loadsImagesAutomatically = true
+            settings.blockNetworkImage = false
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0 (com.speedtester.app)"
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            webViewClient = WebViewClient()
+            tag = html
+            loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
+        }
+    }, update = { view ->
+        if (view.tag != html) {
+            view.tag = html
+            view.loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
+        }
+    })
+}
 @Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
     val appContext = LocalContext.current
     val html = remember(latitude, longitude) { buildServerMapHtml(appContext, latitude, longitude) }
@@ -864,13 +995,19 @@ private data class NdtServerCandidate(
 ) {
     val label: String get() = (sponsor.ifBlank { "Ookla server" }) + " · " + city.ifBlank { host } + (if (serverId.isNotBlank()) " (#$serverId)" else "")
 }
-private fun distanceKmFromMauritius(lat: Double?, lon: Double?): Double? {
+private fun distanceKmBetween(originLat: Double, originLon: Double, lat: Double?, lon: Double?): Double? {
     if (lat == null || lon == null) return null
-    val originLat = Math.toRadians(-20.2); val originLon = Math.toRadians(57.5)
     val targetLat = Math.toRadians(lat); val targetLon = Math.toRadians(lon)
-    val dLat = targetLat - originLat; val dLon = targetLon - originLon
-    val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) + kotlin.math.cos(originLat) * kotlin.math.cos(targetLat) * kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+    val startLat = Math.toRadians(originLat); val startLon = Math.toRadians(originLon)
+    val dLat = targetLat - startLat; val dLon = targetLon - startLon
+    val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) + kotlin.math.cos(startLat) * kotlin.math.cos(targetLat) * kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
     return 6371.0 * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+}
+private fun getLastKnownLocation(context: Context): Location? {
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    return listOf(LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER, LocationManager.GPS_PROVIDER)
+        .firstNotNullOfOrNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
 }
 private object SpeedEngine {
     private const val SERVERS_URL = "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=1000"
