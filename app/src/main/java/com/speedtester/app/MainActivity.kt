@@ -324,8 +324,23 @@ private object SpeedEngine {
         onUpdate("Uploading", .55f, 0f)
         val payload = ByteArray(2_000_000); java.security.SecureRandom().nextBytes(payload)
         val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/empty.php?cors=true&nocache=" + System.nanoTime()
-        val uploadRequest = Request.Builder().url(uploadUrl).post(payload.toRequestBody(null)).header("Cache-Control", "no-cache").build()
         val uploadStart = System.nanoTime()
+        val uploadBody = object : okhttp3.RequestBody() {
+            override fun contentType(): okhttp3.MediaType? = null
+            override fun contentLength(): Long = payload.size.toLong()
+            override fun writeTo(sink: okio.BufferedSink) {
+                var offset = 0
+                while (offset < payload.size) {
+                    val count = minOf(64 * 1024, payload.size - offset)
+                    sink.write(payload, offset, count)
+                    offset += count
+                    val elapsed = (System.nanoTime() - uploadStart).coerceAtLeast(1) / 1_000_000_000.0
+                    val liveMbps = (offset * 8.0 / elapsed / 1_000_000.0).toFloat()
+                    onUpdate("Uploading", (.55 + .4 * offset / payload.size).toFloat(), liveMbps)
+                }
+            }
+        }
+        val uploadRequest = Request.Builder().url(uploadUrl).post(uploadBody).header("Cache-Control", "no-cache").build()
         client.newCall(uploadRequest).execute().use { response -> check(response.isSuccessful) { "Upload failed: HTTP " + response.code + ". Check server upload support." } }
         val uploadMbps = payload.size * 8.0 / ((System.nanoTime() - uploadStart).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
         onUpdate("Uploading", .95f, uploadMbps.toFloat())
