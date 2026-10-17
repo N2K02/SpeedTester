@@ -84,6 +84,34 @@ private fun SpeedTesterApp(context: Context) {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("speedtester", Context.MODE_PRIVATE) }
     var endpoint by remember { mutableStateOf((prefs.getString("endpoint", "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0") ?: "").takeUnless { it.contains("speed.cloudflare.com", ignoreCase = true) } ?: "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0") }
+    var availableServers by remember { mutableStateOf<List<NdtServerCandidate>>(emptyList()) }
+    var selectedServer by remember { mutableStateOf<NdtServerCandidate?>(null) }
+    var serversLoading by remember { mutableStateOf(false) }
+    var serversError by remember { mutableStateOf("") }
+    var serverSearch by remember { mutableStateOf("") }
+    var countryFilter by remember { mutableStateOf("All countries") }
+    var serverPage by remember { mutableIntStateOf(0) }
+    var countryMenuExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        serversLoading = true
+        serversError = ""
+        try {
+            availableServers = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
+            if (availableServers.isEmpty()) serversError = "No compatible M-Lab servers were found. Refresh to try again."
+        } catch (e: Exception) {
+            serversError = e.message ?: "Unable to discover compatible servers"
+        } finally { serversLoading = false }
+    }
+    val filteredServers = remember(availableServers, serverSearch, countryFilter) {
+        availableServers.filter { candidate ->
+            (countryFilter == "All countries" || candidate.countryName.equals(countryFilter, true)) &&
+            (serverSearch.isBlank() || listOf(candidate.host, candidate.city, candidate.country, candidate.label).any { it.contains(serverSearch.trim(), true) })
+        }.sortedWith(compareBy<NdtServerCandidate> { if (it.country.equals("MU", true)) 0 else 1 }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.latencyMs ?: Long.MAX_VALUE })
+    }
+    val serverPageSize = 3
+    val serverPageCount = maxOf(1, (filteredServers.size + serverPageSize - 1) / serverPageSize)
+    val visibleServers = filteredServers.drop(serverPage * serverPageSize).take(serverPageSize)
+    LaunchedEffect(filteredServers.size, serverSearch, countryFilter) { serverPage = 0 }
     var testing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready to test") }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -173,6 +201,75 @@ private fun SpeedTesterApp(context: Context) {
             when (activeTab) {
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("MAURITIUS SERVER SELECTOR", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text("Compatible test servers · local first", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    TextButton(onClick = {
+                                        scope.launch {
+                                            serversLoading = true; serversError = ""
+                                            try {
+                                                val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
+                                                availableServers = refreshed
+                                                if (refreshed.isEmpty()) serversError = "No compatible M-Lab servers were found."
+                                                if (selectedServer != null && refreshed.none { it.host == selectedServer?.host }) selectedServer = null
+                                            } catch (e: Exception) { serversError = e.message ?: "Server refresh failed" }
+                                            finally { serversLoading = false }
+                                        }
+                                    }, enabled = !serversLoading && !testing) { Text("Refresh") }
+                                }
+                                Text("Sorted with Mauritius first, then by estimated distance from the island and measured TCP latency. These are M-Lab NDT7-compatible servers, not a claim that they are hosted by My.t or Emtel.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search server, city, host") }, placeholder = { Text("e.g. Mauritius, Nairobi") })
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Box {
+                                        OutlinedButton(onClick = { countryMenuExpanded = true }) { Text(countryFilter) }
+                                        DropdownMenu(expanded = countryMenuExpanded, onDismissRequest = { countryMenuExpanded = false }) {
+                                            (listOf("All countries") + availableServers.map { it.countryName }.filter { it.isNotBlank() }.distinct().sorted()).forEach { country ->
+                                                DropdownMenuItem(text = { Text(country) }, onClick = { countryFilter = country; countryMenuExpanded = false })
+                                            }
+                                        }
+                                    }
+                                    Text("${filteredServers.size} server(s) · max 10", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                }
+                                if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding compatible servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                                if (serversError.isNotBlank()) Text(serversError, color = Color(0xFFFFA64D), style = MaterialTheme.typography.bodySmall)
+                                if (!serversLoading && visibleServers.isEmpty()) Text("No servers match this search/filter. Try All countries or refresh.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                visibleServers.forEach { candidate ->
+                                    val isSelected = selectedServer?.host == candidate.host
+                                    Card(
+                                        onClick = { if (!testing) selectedServer = candidate },
+                                        enabled = !testing,
+                                        colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF173B3B) else Color(0xFF0D151C)),
+                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Teal) else null,
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            RadioButton(selected = isSelected, onClick = { if (!testing) selectedServer = candidate }, enabled = !testing)
+                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Text(candidate.label, color = Color.White, fontWeight = FontWeight.SemiBold)
+                                                Text(candidate.host, color = Muted, style = MaterialTheme.typography.labelSmall)
+                                                Text(listOf(candidate.city, candidate.countryName).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Location not provided" }, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                                Text("Distance: ${candidate.distanceKm?.let { "${it.toInt()} km from Mauritius" } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                            }
+                                            if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = Teal)
+                                        }
+                                    }
+                                }
+                                if (serverPageCount > 1) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                        TextButton(onClick = { serverPage = (serverPage - 1).coerceAtLeast(0) }, enabled = serverPage > 0) { Text("Previous") }
+                                        Text("Page ${serverPage + 1} of ${serverPageCount}", color = Muted, style = MaterialTheme.typography.labelMedium)
+                                        TextButton(onClick = { serverPage = (serverPage + 1).coerceAtMost(serverPageCount - 1) }, enabled = serverPage < serverPageCount - 1) { Text("Next") }
+                                    }
+                                }
+                                Text(if (selectedServer == null) "Select a server to enable the speed test." else "Selected: ${selectedServer?.label}", color = if (selectedServer == null) Muted else Teal, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(24.dp)) {
                             Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(status, color = Muted, style = MaterialTheme.typography.labelLarge)
@@ -207,7 +304,7 @@ private fun SpeedTesterApp(context: Context) {
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
                                         scope.launch {
                                             try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { server ->
+                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), selectedServer, { server ->
                                                     scope.launch {
                                                         serverDetails = server
                                                         prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
@@ -236,7 +333,7 @@ private fun SpeedTesterApp(context: Context) {
                                             finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
                                         }
                                     }
-                                }, enabled = !testing, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { Text(if (testing) "TEST RUNNING…" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
+                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
                                 error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                             }
@@ -797,53 +894,118 @@ private fun assessQuality(download: Double, upload: Double, ping: Long, jitter: 
     val label = when { score >= 85 -> "Excellent"; score >= 70 -> "Very good"; score >= 50 -> "Good"; score >= 30 -> "Fair"; else -> "Needs attention" }
     return QualityAssessment(score, label, "A SpeedTester estimate based on speed, latency, jitter and stability—not an official M-Lab rating.")
 }
+private data class NdtServerCandidate(
+    val host: String, val city: String, val country: String, val countryName: String,
+    val downloadUrl: String, val uploadUrl: String,
+    val latitude: Double? = null, val longitude: Double? = null,
+    val distanceKm: Double? = null, val latencyMs: Long? = null
+) {
+    val label: String get() = "M-Lab NDT7 · " + city.ifBlank { host }
+}
+private fun distanceKmFromMauritius(lat: Double?, lon: Double?): Double? {
+    if (lat == null || lon == null) return null
+    val originLat = Math.toRadians(-20.2); val originLon = Math.toRadians(57.5)
+    val targetLat = Math.toRadians(lat); val targetLon = Math.toRadians(lon)
+    val dLat = targetLat - originLat; val dLon = targetLon - originLon
+    val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) + kotlin.math.cos(originLat) * kotlin.math.cos(targetLat) * kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+    return 6371.0 * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+}
 private object SpeedEngine {
     private const val LOCATE_URL = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0"
     private const val PROTOCOL = "net.measurementlab.ndt.v7"
     private const val TEST_SECONDS = 10.0
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(0, TimeUnit.MILLISECONDS).build()
 
-    suspend fun run(base: String, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
-        val locateUrl = if (base.contains("locate.measurementlab.net", true)) base else LOCATE_URL
-        onLog("Engine: M-Lab NDT7 over secure WebSockets")
-        onLog("Discovery URL: " + locateUrl)
-        onLog("NDT7 subprotocol: " + PROTOCOL)
-        val discoveryStartedAt = System.nanoTime()
-        val json = client.newCall(Request.Builder().url(locateUrl).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
-            onLog("DISCOVERY HTTP " + response.code + " " + response.message)
-            if (!response.isSuccessful) error("M-Lab discovery failed: HTTP " + response.code)
-            JSONObject(response.body?.string() ?: error("M-Lab returned an empty response"))
+    suspend fun discoverCandidates(): List<NdtServerCandidate> = withContext(Dispatchers.IO) {
+        val urls = listOf(LOCATE_URL + "&country=MU&strict=true", LOCATE_URL + "&country=MU", LOCATE_URL)
+        val found = linkedMapOf<String, NdtServerCandidate>()
+        for (url in urls) {
+            try {
+                val json = client.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
+                    if (!response.isSuccessful) return@use JSONObject()
+                    JSONObject(response.body?.string() ?: "{}")
+                }
+                val results = json.optJSONArray("results") ?: continue
+                for (i in 0 until results.length()) {
+                    val result = results.optJSONObject(i) ?: continue
+                    val urlsObject = result.optJSONObject("urls") ?: continue
+                    var down = ""; var up = ""
+                    val keys = urlsObject.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        if (key.startsWith("wss://") && key.contains("ndt/v7/download")) down = urlsObject.optString(key)
+                        if (key.startsWith("wss://") && key.contains("ndt/v7/upload")) up = urlsObject.optString(key)
+                    }
+                    if (!down.startsWith("wss://") || !up.startsWith("wss://")) continue
+                    val host = runCatching { java.net.URI(down).host }.getOrNull().orEmpty()
+                    if (host.isBlank() || found.containsKey(host)) continue
+                    val location = result.optJSONObject("location")
+                    val city = location?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
+                    val country = location?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
+                    val countryName = when (country.uppercase(java.util.Locale.ROOT)) { "MU" -> "Mauritius"; "MG" -> "Madagascar"; "ZA" -> "South Africa"; "KE" -> "Kenya"; "RE" -> "Réunion"; "SC" -> "Seychelles"; else -> country }
+                    val lat = location?.optString("latitude")?.toDoubleOrNull()
+                    val lon = location?.optString("longitude")?.toDoubleOrNull()
+                    val portValue = runCatching { java.net.URI(down).port }.getOrDefault(-1)
+                    val port = if (portValue > 0) portValue else 443
+                    val latency = runCatching {
+                        val started = System.nanoTime()
+                        Socket().use { it.connect(java.net.InetSocketAddress(host, port), 900) }
+                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                    }.getOrNull()
+                    found[host] = NdtServerCandidate(host, city, country, countryName, down, up, lat, lon, distanceKmFromMauritius(lat, lon), latency)
+                    if (found.size >= 10) break
+                }
+            } catch (_: Exception) { /* Try the next discovery scope. */ }
+            if (found.size >= 10) break
         }
-        val discoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStartedAt)
-        onLog("DISCOVERY TIME: " + discoveryMs + "ms")
-        val results = json.optJSONArray("results") ?: error("M-Lab discovery returned no server results")
-        var downUrl = ""
-        var upUrl = ""
-        var locationName = "location unavailable"
-        var locationCity = ""
-        var locationCountry = ""
-        for (i in 0 until results.length()) {
-            val result = results.optJSONObject(i) ?: continue
-            val urls = result.optJSONObject("urls") ?: continue
-            var d = urls.optString("wss:///ndt/v7/download")
-            var u = urls.optString("wss:///ndt/v7/upload")
-            val keys = urls.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                if (key.startsWith("wss://") && key.contains("ndt/v7/download")) d = urls.optString(key)
-                if (key.startsWith("wss://") && key.contains("ndt/v7/upload")) u = urls.optString(key)
+        found.values.sortedWith(compareBy<NdtServerCandidate> { if (it.country.equals("MU", true)) 0 else 1 }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.latencyMs ?: Long.MAX_VALUE }).take(10)
+    }
+
+    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+        var downUrl = selectedServer?.downloadUrl.orEmpty()
+        var upUrl = selectedServer?.uploadUrl.orEmpty()
+        var locationName = selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }.orEmpty().ifBlank { "location unavailable" }
+        var locationCity = selectedServer?.city.orEmpty()
+        var locationCountry = selectedServer?.country.orEmpty()
+        if (selectedServer == null) {
+            val locateUrl = if (base.contains("locate.measurementlab.net", true)) base else LOCATE_URL
+            onLog("Engine: M-Lab NDT7 over secure WebSockets")
+            onLog("Discovery URL: " + locateUrl)
+            onLog("NDT7 subprotocol: " + PROTOCOL)
+            val discoveryStartedAt = System.nanoTime()
+            val json = client.newCall(Request.Builder().url(locateUrl).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
+                onLog("DISCOVERY HTTP " + response.code + " " + response.message)
+                if (!response.isSuccessful) error("M-Lab discovery failed: HTTP " + response.code)
+                JSONObject(response.body?.string() ?: error("M-Lab returned an empty response"))
             }
-            if (d.startsWith("wss://") && u.startsWith("wss://")) {
-                downUrl = d
-                upUrl = u
-                val loc = result.optJSONObject("location")
-                locationCity = loc?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
-                locationCountry = loc?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
-                locationName = listOf(locationCity, locationCountry).filter { it.isNotBlank() }.joinToString(", ").ifBlank { locationName }
-                break
+            val discoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStartedAt)
+            onLog("DISCOVERY TIME: " + discoveryMs + "ms")
+            val results = json.optJSONArray("results") ?: error("M-Lab discovery returned no server results")
+            for (i in 0 until results.length()) {
+                val result = results.optJSONObject(i) ?: continue
+                val urls = result.optJSONObject("urls") ?: continue
+                var d = ""; var u = ""
+                val keys = urls.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (key.startsWith("wss://") && key.contains("ndt/v7/download")) d = urls.optString(key)
+                    if (key.startsWith("wss://") && key.contains("ndt/v7/upload")) u = urls.optString(key)
+                }
+                if (d.startsWith("wss://") && u.startsWith("wss://")) {
+                    downUrl = d; upUrl = u
+                    val loc = result.optJSONObject("location")
+                    locationCity = loc?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
+                    locationCountry = loc?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
+                    locationName = listOf(locationCity, locationCountry).filter { it.isNotBlank() }.joinToString(", ").ifBlank { locationName }
+                    break
+                }
             }
+        } else {
+            onLog("Engine: M-Lab NDT7 using the server selected in the Mauritius selector")
+            onLog("Selected server endpoint: " + selectedServer.host)
+            onLog("Selected server latency: " + (selectedServer.latencyMs?.let { "$it ms" } ?: "not measured"))
         }
-        if (downUrl.isBlank() || upUrl.isBlank()) error("M-Lab discovery found no usable secure NDT7 server")
+        if (downUrl.isBlank() || upUrl.isBlank()) error("No usable secure NDT7 server was selected or discovered")
         onLog("DISCOVERY STATUS: success")
         val uri = java.net.URI(downUrl)
         val host = uri.host ?: error("M-Lab returned an invalid server URL")
