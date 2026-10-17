@@ -151,6 +151,8 @@ private fun SpeedTesterApp(context: Context) {
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
+                                                downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
+                                                loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount)
                                                 history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
                                                 val arr = org.json.JSONArray()
@@ -360,10 +362,11 @@ private object SpeedEngine {
             val stream = response.body?.byteStream() ?: error("Empty download response"); val buffer = ByteArray(32 * 1024)
             while (true) {
                 val n = stream.read(buffer); if (n < 0) break; bytes += n
-                val fraction = (bytes.toDouble() / 16_000_000.0).coerceIn(0.0, 1.0)
+                val expectedBytes = if (cloudflare) 16_000_000.0 else 8_000_000.0
+                val fraction = (bytes.toDouble() / expectedBytes).coerceIn(0.0, 1.0)
                 val elapsed = (System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0
                 val now = System.nanoTime()
-                if (now - lastReportNanos >= 200_000_000L || bytes >= 8_000_000L) {
+                if (now - lastReportNanos >= 200_000_000L || bytes - lastReportBytes >= 8_000_000L) {
                     val windowSeconds = (now - lastReportNanos).coerceAtLeast(1) / 1_000_000_000.0
                     val liveMbps = ((bytes - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).coerceAtLeast(0.0)
                     if (liveMbps > 0.0) downloadRates.add(liveMbps)
