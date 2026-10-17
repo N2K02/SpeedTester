@@ -384,7 +384,7 @@ private fun SpeedTesterApp(context: Context) {
                                 InfoRow("Discovery duration", if (serverDiscoveryMs >= 0) "%.2f s".format(java.util.Locale.US, serverDiscoveryMs / 1000.0) else "—")
                                 InfoRow("Test status", when { testing -> status; selectedServer != null -> "Ready · server selected"; serversLoading -> "Discovering…"; else -> "Select a Mauritius server" })
                                 InfoRow("Test server", selectedServer?.let { "${it.sponsor.ifBlank { "Ookla server" }} · ${it.host}" } ?: serverDetails.host.ifBlank { "Not selected yet" })
-                                InfoRow("Server location", selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }?.ifBlank { null } ?: serverDetails.location.ifBlank { "Not available yet" })
+                                InfoRow("Server location", selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }?.takeIf { it.isNotBlank() } ?: serverDetails.location.ifBlank { "Not available yet" })
                                 InfoRow("Selected-server TCP ping", if (ping >= 0) "$ping ms" else selectedServer?.latencyMs?.let { "$it ms (directory scan)" } ?: "Measured during test")
                                 Text("Discovery duration measures the Mauritius server-directory lookup. Ping is measured separately against the selected endpoint.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 InfoRow("Protocol", "Ookla-compatible HTTPS transfer")
@@ -693,7 +693,8 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
     val caps = cm.getNetworkCapabilities(cm.activeNetwork)
     val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-    val info = wifi.connectionInfo
+    // Prefer the active network's WifiInfo on modern Android; fall back for older releases.
+    val info = (caps?.transportInfo as? android.net.wifi.WifiInfo) ?: wifi.connectionInfo
     val type = when {
         caps == null -> "Disconnected"
         caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
@@ -704,10 +705,14 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     }
     val isWifi = type == "Wi-Fi"
     val freq = if (isWifi && info.frequency > 0) (if (info.frequency >= 5925) "6 GHz" else if (info.frequency >= 4900) "5 GHz" else "2.4 GHz") + " (" + info.frequency + " MHz)" else "—"
-    val hasWifiInfo = isWifi && info.networkId != -1 && info.rssi != -127
+    val hasWifiInfo = isWifi && info.rssi in -126..0
     val rssi = if (hasWifiInfo) info.rssi else 0
     val quality = when { !hasWifiInfo -> "Unavailable"; rssi >= -50 -> "Excellent"; rssi >= -60 -> "Very good"; rssi >= -67 -> "Good"; rssi >= -75 -> "Fair"; else -> "Weak" }
-    val note = when { !isWifi -> "Wi-Fi is not the active network"; !hasWifiInfo -> "Android did not expose Wi-Fi RSSI"; else -> "RSSI is an Android-reported estimate and may fluctuate" }
+    val note = when {
+        !isWifi -> "Wi-Fi is not the active network"
+        !hasWifiInfo -> "Android is restricting Wi-Fi signal details; link speed and band may still be available"
+        else -> "Signal is refreshed every 2.5 seconds; RSSI is an Android-reported estimate"
+    }
     return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note)
 }
 private data class ServerDetails(val host: String, val city: String, val country: String, val latitude: Double? = null, val longitude: Double? = null) {
