@@ -114,6 +114,16 @@ private fun SpeedTesterApp(context: Context) {
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
+    LaunchedEffect(activeTab, serverDetails.city, serverDetails.country, serverDetails.latitude, serverDetails.longitude) {
+        if (activeTab == 2 && serverDetails.latitude == null && serverDetails.longitude == null && serverDetails.city.isNotBlank()) {
+            val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(serverDetails.city, serverDetails.country) }
+            if (coords != null) {
+                val mapped = serverDetails.copy(latitude = coords.first, longitude = coords.second)
+                serverDetails = mapped
+                prefs.edit().putString("server_lat", mapped.latitude.toString()).putString("server_lon", mapped.longitude.toString()).apply()
+            }
+        }
+    }
     var downloadTcp by remember { mutableStateOf<NdtTcpInfo?>(null) }
     var uploadTcp by remember { mutableStateOf<NdtTcpInfo?>(null) }
     var serverIp by remember { mutableStateOf("") }
@@ -596,20 +606,30 @@ private data class ServerDetails(val host: String, val city: String, val country
 private object ServerGeoLocator {
     private val client = OkHttpClient.Builder().callTimeout(8, TimeUnit.SECONDS).build()
     fun locate(city: String, country: String): Pair<Double, Double>? {
-        if (city.isBlank() || country.isBlank()) return null
-        return runCatching {
-            val query = java.net.URLEncoder.encode("$city, $country", "UTF-8")
-            val request = Request.Builder().url("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=$query").header("User-Agent", "SpeedTester-Android/1.0").header("Accept", "application/json").build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val results = org.json.JSONArray(response.body?.string() ?: "[]")
-                if (results.length() == 0) return null
-                val item = results.getJSONObject(0)
-                val lat = item.optString("lat").toDoubleOrNull() ?: return null
-                val lon = item.optString("lon").toDoubleOrNull() ?: return null
-                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) null else lat to lon
-            }
-        }.getOrNull()
+        if (city.isBlank()) return null
+        val queries = listOf("$city, $country", city).filter { it.isNotBlank() }.distinct()
+        for ((index, text) in queries.withIndex()) {
+            if (index > 0) Thread.sleep(1100L)
+            val found = runCatching {
+                val query = java.net.URLEncoder.encode(text, "UTF-8")
+                val request = Request.Builder()
+                    .url("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=$query")
+                    .header("User-Agent", "SpeedTester-Android/1.0 (server map)")
+                    .header("Accept", "application/json")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use null
+                    val results = org.json.JSONArray(response.body?.string() ?: "[]")
+                    if (results.length() == 0) return@use null
+                    val item = results.getJSONObject(0)
+                    val lat = item.optString("lat").toDoubleOrNull() ?: return@use null
+                    val lon = item.optString("lon").toDoubleOrNull() ?: return@use null
+                    if (lat !in -90.0..90.0 || lon !in -180.0..180.0) null else lat to lon
+                }
+            }.getOrNull()
+            if (found != null) return found
+        }
+        return null
     }
 }
 @Composable private fun TcpInfoRows(info: NdtTcpInfo?) {
@@ -627,21 +647,34 @@ private object ServerGeoLocator {
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
 @Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
-    val html = remember(latitude, longitude) {
-        """<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head><body style="margin:0;background:#0d151b"><div id="map" style="width:100%;height:100vh"></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map').setView([$latitude,$longitude],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);L.marker([$latitude,$longitude]).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();</script></body></html>"""
+    val mapUrl = remember(latitude, longitude) {
+        val west = (longitude - 1.5).coerceAtLeast(-180.0)
+        val east = (longitude + 1.5).coerceAtMost(180.0)
+        val south = (latitude - 0.8).coerceAtLeast(-85.0)
+        val north = (latitude + 0.8).coerceAtMost(85.0)
+        val box = listOf(west, south, east, north).joinToString("%2C") { "%.6f".format(java.util.Locale.US, it) }
+        "https://www.openstreetmap.org/export/embed.html?bbox=$box&layer=mapnik&marker=" +
+            "%.6f".format(java.util.Locale.US, latitude) + "%2C" +
+            "%.6f".format(java.util.Locale.US, longitude)
     }
     AndroidView(modifier = modifier, factory = { context ->
         WebView(context).apply {
             settings.javaScriptEnabled = true
-            settings.domStorageEnabled = false
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
+            settings.blockNetworkImage = false
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(android.graphics.Color.rgb(13, 21, 27))
             webViewClient = WebViewClient()
-            tag = html
-            loadDataWithBaseURL("https://www.openstreetmap.org/", html, "text/html", "UTF-8", null)
+            tag = mapUrl
+            loadUrl(mapUrl)
         }
     }, update = { view ->
-        if (view.tag != html) {
-            view.tag = html
-            view.loadDataWithBaseURL("https://www.openstreetmap.org/", html, "text/html", "UTF-8", null)
+        if (view.tag != mapUrl) {
+            view.tag = mapUrl
+            view.loadUrl(mapUrl)
         }
     })
 }
