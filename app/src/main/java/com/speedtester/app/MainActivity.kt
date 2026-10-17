@@ -48,7 +48,7 @@ import kotlin.math.max
 
 private val Teal = Color(0xFF13B8A6)
 private val Muted = Color(0xFF8A9AA5)
-data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String)
+data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { SpeedTesterApp(this) } }
@@ -67,6 +67,14 @@ private fun SpeedTesterApp(context: Context) {
     var upload by remember { mutableDoubleStateOf(0.0) }
     var ping by remember { mutableLongStateOf(-1L) }
     var jitter by remember { mutableDoubleStateOf(0.0) }
+    var downloadAverage by remember { mutableDoubleStateOf(0.0) }
+    var downloadPeak by remember { mutableDoubleStateOf(0.0) }
+    var uploadAverage by remember { mutableDoubleStateOf(0.0) }
+    var uploadPeak by remember { mutableDoubleStateOf(0.0) }
+    var loadedPing by remember { mutableLongStateOf(-1L) }
+    var loadedJitter by remember { mutableDoubleStateOf(0.0) }
+    var failedProbes by remember { mutableIntStateOf(0) }
+    var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
     var updateMessage by remember { mutableStateOf("Tap Check for updates to see the latest release.") }
@@ -86,7 +94,7 @@ private fun SpeedTesterApp(context: Context) {
             val arr = org.json.JSONArray(prefs.getString("history", "[]"))
             (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
-                TestResult(o.optString("date"), o.optDouble("download"), o.optDouble("upload"), o.optLong("ping", -1), o.optDouble("jitter"), o.optString("server"))
+                TestResult(o.optString("date"), o.optDouble("download"), o.optDouble("upload"), o.optLong("ping", -1), o.optDouble("jitter"), o.optString("server"), o.optDouble("downloadAverage"), o.optDouble("downloadPeak"), o.optDouble("uploadAverage"), o.optDouble("uploadPeak"), o.optLong("loadedPing", -1), o.optDouble("loadedJitter"), o.optInt("failedProbes"), o.optInt("probeCount"))
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
@@ -122,6 +130,14 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(10.dp))
                                 BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.fillMaxWidth().height(170.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("━ Download", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall); Text("━ Upload", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall); Text("Live · Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                     StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
+                                     StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
+                                 }
+                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                     StatTile("UPLOAD AVG", "%.1f".format(uploadAverage), "Mbps", Color(0xFFFFA64D), Modifier.weight(1f))
+                                     StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", Color(0xFFFFA64D), Modifier.weight(1f))
+                                 }
                                  Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = Muted, style = MaterialTheme.typography.bodySmall)
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
@@ -135,10 +151,10 @@ private fun SpeedTesterApp(context: Context) {
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount)
                                                 history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
                                                 val arr = org.json.JSONArray()
-                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download).put("upload", x.upload).put("ping", x.ping).put("jitter", x.jitter).put("server", x.server)) }
+                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download).put("upload", x.upload).put("ping", x.ping).put("jitter", x.jitter).put("server", x.server).put("downloadAverage", x.downloadAverage).put("downloadPeak", x.downloadPeak).put("uploadAverage", x.uploadAverage).put("uploadPeak", x.uploadPeak).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)) }
                                                 prefs.edit().putString("history", arr.toString()).apply(); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
                                             } catch (e: Exception) { error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
@@ -166,7 +182,9 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
+                                InfoRow("Test server", runCatching { URL(endpoint).host }.getOrDefault("Invalid URL"))
+                                 InfoRow("Protocol", runCatching { URL(endpoint).protocol.uppercase(java.util.Locale.ROOT) }.getOrDefault("—"))
+                                 InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
                                 InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Signal quality", netInfo.quality); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency / band", netInfo.frequency); InfoRow("Connection note", netInfo.note)
                             }
                         }
@@ -178,7 +196,7 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Row {
                             OutlinedButton(onClick = {
-                                val csv = buildString { append("date,download_mbps,upload_mbps,ping_ms,jitter_ms,server\n"); history.forEach { append("\"" + it.date + "\"," + it.download + "," + it.upload + "," + it.ping + "," + it.jitter + ",\"" + it.server + "\"\n") } }
+                                val csv = buildString { append("date,download_mbps,upload_mbps,download_average_mbps,download_peak_mbps,upload_average_mbps,upload_peak_mbps,ping_ms,jitter_ms,loaded_ping_ms,loaded_jitter_ms,failed_tcp_probes,total_tcp_probes,server\n"); history.forEach { val safeServer = it.server.replace("\"", "\"\""); append("\"" + it.date + "\"," + it.download + "," + it.upload + "," + it.downloadAverage + "," + it.downloadPeak + "," + it.uploadAverage + "," + it.uploadPeak + "," + it.ping + "," + it.jitter + "," + it.loadedPing + "," + it.loadedJitter + "," + it.failedProbes + "," + it.probeCount + ",\"" + safeServer + "\"\n") } }
                                 val file = File(context.cacheDir, "speedtester-history.csv"); file.writeText(csv)
                                 val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", file)
                                 context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/csv").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Export history"))
@@ -195,6 +213,9 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(6.dp))
                                 Text("↓ %.1f Mbps    ↑ %.1f Mbps".format(item.download, item.upload), fontWeight = FontWeight.Bold)
                                 Text("Ping " + item.ping + " ms  ·  Jitter %.1f ms".format(item.jitter), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Avg / peak ↓ %.1f / %.1f · ↑ %.1f / %.1f Mbps".format(item.downloadAverage, item.downloadPeak, item.uploadAverage, item.uploadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Loaded ping " + (if (item.loadedPing >= 0) "${item.loadedPing} ms" else "—") + " · Failed probes ${item.failedProbes}/${item.probeCount}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Row { Spacer(Modifier.weight(1f)); TextButton(onClick = { shareTestResult(context, item) }) { Text("Share result") } }
                             }
                         }
                     }
@@ -264,6 +285,27 @@ private fun SpeedTesterApp(context: Context) {
         drawSeries(downloadSamples, Color(0xFF32A8FF)); drawSeries(uploadSamples, Color(0xFFFFA64D))
     }
 }
+@Composable private fun StatTile(label: String, value: String, unit: String, tint: Color, modifier: Modifier = Modifier) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFF0D151B)), shape = RoundedCornerShape(12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp)) {
+            Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(value, color = tint, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+            Text(unit, color = Muted, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+private fun shareTestResult(context: Context, item: TestResult) {
+    val shareText = buildString {
+        append("SpeedTester result · ").append(item.date).append("\n")
+        append("Download: %.1f Mbps (avg %.1f, peak %.1f)\n".format(item.download, item.downloadAverage, item.downloadPeak))
+        append("Upload: %.1f Mbps (avg %.1f, peak %.1f)\n".format(item.upload, item.uploadAverage, item.uploadPeak))
+        append("Idle TCP latency: ").append(item.ping).append(" ms · jitter %.1f ms\n".format(item.jitter))
+        append("Loaded TCP latency: ").append(if (item.loadedPing >= 0) "${item.loadedPing} ms" else "unavailable").append(" · jitter %.1f ms\n".format(item.loadedJitter))
+        append("Connection probes failed: ").append(item.failedProbes).append("/").append(item.probeCount).append("\n")
+        append("Server: ").append(item.server)
+    }
+    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shareText), "Share speed test result"))
+}
 private data class NetworkInfo(val type: String, val connected: Boolean, val signal: String, val quality: String, val link: String, val frequency: String, val note: String)
 @Suppress("DEPRECATION")
 private fun readNetworkInfo(context: Context): NetworkInfo {
@@ -287,7 +329,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val note = when { !isWifi -> "Wi-Fi is not the active network"; !hasWifiInfo -> "Android did not expose Wi-Fi RSSI"; else -> "RSSI is an Android-reported estimate and may fluctuate" }
     return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note)
 }
-private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double)
+private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int)
 private object SpeedEngine {
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build()
     suspend fun run(base: String, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
@@ -311,6 +353,7 @@ private object SpeedEngine {
         val cloudflare = URL(base).host.equals("speed.cloudflare.com", ignoreCase = true)
         val downloadUrl = if (cloudflare) base + "/__down?bytes=16000000&nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&ckSize=8&nocache=" + System.nanoTime()
         val request = Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").build()
+        val downloadRates = mutableListOf<Double>()
         val started = System.nanoTime(); var bytes = 0L; var lastReportNanos = started; var lastReportBytes = 0L
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Download failed: HTTP " + response.code + ". Check server URL." }
@@ -322,38 +365,64 @@ private object SpeedEngine {
                 val now = System.nanoTime()
                 if (now - lastReportNanos >= 200_000_000L || bytes >= 8_000_000L) {
                     val windowSeconds = (now - lastReportNanos).coerceAtLeast(1) / 1_000_000_000.0
-                    val liveMbps = ((bytes - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).toFloat()
-                    onUpdate("Downloading", (.08 + .42 * fraction).toFloat(), liveMbps)
+                    val liveMbps = ((bytes - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).coerceAtLeast(0.0)
+                    if (liveMbps > 0.0) downloadRates.add(liveMbps)
+                    onUpdate("Downloading", (.08 + .42 * fraction).toFloat(), liveMbps.toFloat())
                     lastReportNanos = now; lastReportBytes = bytes
                 }
             }
         }
         val downloadMbps = bytes * 8.0 / ((System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
+        if (downloadRates.isEmpty()) downloadRates.add(downloadMbps) else if (downloadRates.size == 1) downloadRates.add(downloadMbps)
         onUpdate("Uploading", .55f, 0f)
         val payload = ByteArray(4_000_000); java.security.SecureRandom().nextBytes(payload)
         val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/empty.php?cors=true&nocache=" + System.nanoTime()
         kotlinx.coroutines.delay(350)
         val uploadStart = System.nanoTime()
+        val uploadRates = mutableListOf<Double>()
         val uploadBody = object : okhttp3.RequestBody() {
             override fun contentType(): okhttp3.MediaType? = null
             override fun contentLength(): Long = payload.size.toLong()
             override fun writeTo(sink: okio.BufferedSink) {
                 var offset = 0
+                var lastReportNanos = uploadStart
+                var lastReportBytes = 0
                 while (offset < payload.size) {
                     val count = minOf(64 * 1024, payload.size - offset)
                     sink.write(payload, offset, count)
                     offset += count
-                    val elapsed = (System.nanoTime() - uploadStart).coerceAtLeast(1) / 1_000_000_000.0
-                    val liveMbps = (offset * 8.0 / elapsed / 1_000_000.0).toFloat()
-                    onUpdate("Uploading", (.55 + .4 * offset / payload.size).toFloat(), liveMbps)
+                    val now = System.nanoTime()
+                    if (now - lastReportNanos >= 200_000_000L || offset == payload.size) {
+                        val windowSeconds = (now - lastReportNanos).coerceAtLeast(1) / 1_000_000_000.0
+                        val liveMbps = ((offset - lastReportBytes) * 8.0 / windowSeconds / 1_000_000.0).coerceAtLeast(0.0)
+                        if (liveMbps > 0.0) uploadRates.add(liveMbps)
+                        onUpdate("Uploading", (.55 + .4 * offset / payload.size).toFloat(), liveMbps.toFloat())
+                        lastReportNanos = now
+                        lastReportBytes = offset
+                    }
                 }
             }
         }
         val uploadRequest = Request.Builder().url(uploadUrl).post(uploadBody).header("Cache-Control", "no-cache").build()
         client.newCall(uploadRequest).execute().use { response -> check(response.isSuccessful) { "Upload failed: HTTP " + response.code + ". Check server upload support." } }
         val uploadMbps = payload.size * 8.0 / ((System.nanoTime() - uploadStart).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
+        if (uploadRates.isEmpty()) uploadRates.add(uploadMbps) else if (uploadRates.size == 1) uploadRates.add(uploadMbps)
         onUpdate("Uploading", .95f, uploadMbps.toFloat())
-        onUpdate("Complete", 1f, 0f); SpeedOutcome(downloadMbps, uploadMbps, ping, jitter)
+        onUpdate("Checking connection stability", .96f, 0f)
+        val loadedPings = mutableListOf<Long>()
+        var failed = 0
+        repeat(5) {
+            try {
+                val probeStart = System.nanoTime()
+                Socket().use { it.connect(java.net.InetSocketAddress(host, port), 1500) }
+                loadedPings.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - probeStart))
+            } catch (_: Exception) { failed++ }
+            kotlinx.coroutines.delay(100)
+        }
+        val loadedPing = if (loadedPings.isNotEmpty()) loadedPings.average().toLong() else -1L
+        val loadedJitter = if (loadedPings.size > 1) loadedPings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
+        onUpdate("Complete", 1f, 0f)
+        SpeedOutcome(downloadMbps, uploadMbps, ping, jitter, downloadRates.average(), downloadRates.maxOrNull() ?: downloadMbps, uploadRates.average(), uploadRates.maxOrNull() ?: uploadMbps, loadedPing, loadedJitter, failed, 5)
     }
 }
 private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String)
