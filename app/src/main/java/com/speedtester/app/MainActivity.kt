@@ -76,7 +76,8 @@ private fun SpeedTesterApp(context: Context) {
     var updateAvailable by remember { mutableStateOf(false) }
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
-    val samples = remember { mutableStateListOf<Float>() }
+    val downloadSamples = remember { mutableStateListOf<Float>() }
+    val uploadSamples = remember { mutableStateListOf<Float>() }
     val history = remember {
         runCatching {
             val arr = org.json.JSONArray(prefs.getString("history", "[]"))
@@ -109,11 +110,13 @@ private fun SpeedTesterApp(context: Context) {
                             Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(status, color = Muted, style = MaterialTheme.typography.labelLarge)
                                 Spacer(Modifier.height(8.dp))
-                                Text(String.format("%.1f", download), style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text("DOWNLOAD Mbps", color = Teal, style = MaterialTheme.typography.labelMedium)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("↓ DOWNLOAD", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("↑ UPLOAD", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                }
                                 Spacer(Modifier.height(10.dp))
-                                BandwidthChart(samples.toList(), Modifier.fillMaxWidth().height(150.dp))
-                                Text("LIVE THROUGHPUT · AUTO-SCALED · LAST 80 SAMPLES", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.fillMaxWidth().height(170.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("━ Download", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall); Text("━ Upload", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall); Text("Live · Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
                                 Spacer(Modifier.height(12.dp))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     Metric("UPLOAD", if (upload > 0) String.format("%.1f", upload) else "—", "Mbps")
@@ -123,13 +126,13 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; samples.clear(); status = "Measuring latency…"; activityLog.clear(); activityLog.add("Starting test against " + endpoint.trim()); activityLog.add("Checking TCP connection latency…")
+                                        testing = true; error = null; progress = 0f; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Resolving host and checking TCP latency to " + endpoint.trim())
                                         scope.launch {
                                             try {
                                                 val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value, mbps ->
                                                     status = phase; progress = value
-                                                    if (activityLog.lastOrNull() != phase) { activityLog.add(phase + " phase started"); if (activityLog.size > 8) activityLog.removeAt(0) }
-                                                    if (mbps > 0f) { samples.add(mbps); if (samples.size > 80) samples.removeAt(0); if (activityLog.lastOrNull()?.startsWith("Live rate:") != true) { activityLog.add("Live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps)); if (activityLog.size > 8) activityLog.removeAt(0) } else { activityLog[activityLog.lastIndex] = "Live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps) } }
+                                                    if (activityLog.lastOrNull() != phase + " phase started") { activityLog.add(phase + " phase started"); if (activityLog.size > 8) activityLog.removeAt(0) }
+                                                    if (mbps > 0f) { val target = if (phase.contains("Upload", true)) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { p, j -> ping = p; jitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint)
@@ -163,8 +166,8 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                InfoRow("Network", netInfo.type); InfoRow("Internet", if (netInfo.connected) "Connected" else "Not connected")
-                                InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency", netInfo.frequency)
+                                InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
+                                InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Signal quality", netInfo.quality); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency / band", netInfo.frequency); InfoRow("Connection note", netInfo.note)
                             }
                         }
                     }
@@ -249,26 +252,19 @@ private fun SpeedTesterApp(context: Context) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(label, color = Muted, style = MaterialTheme.typography.labelSmall); Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text(unit, color = Muted, style = MaterialTheme.typography.labelSmall) }
 }
 @Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = Muted); Text(value, fontWeight = FontWeight.Medium) } }
-@Composable private fun BandwidthChart(samples: List<Float>, modifier: Modifier = Modifier) {
+@Composable private fun BandwidthChart(downloadSamples: List<Float>, uploadSamples: List<Float>, modifier: Modifier = Modifier) {
     Canvas(modifier.background(Color(0xFF0D151B), RoundedCornerShape(12.dp)).padding(8.dp)) {
-        val maxValue = max(10f, samples.maxOrNull() ?: 10f)
+        val allSamples = downloadSamples + uploadSamples
+        val maxValue = max(10f, allSamples.maxOrNull() ?: 10f)
         for (i in 0..4) {
             val y = size.height * i / 4f
             drawLine(Color(0xFF26343E), Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
         }
-        if (samples.size < 2) return@Canvas
-        val path = Path()
-        samples.forEachIndexed { i, value ->
-            val x = size.width * i / (samples.size - 1).toFloat()
-            val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        drawPath(path, Teal, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
-        val last = samples.last()
-        drawCircle(Teal, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height))
+        fun drawSeries(samples: List<Float>, color: Color) { if (samples.size < 2) return; val path = Path(); samples.forEachIndexed { i, value -> val x = size.width * i / (samples.size - 1).toFloat(); val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height; if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)); val last = samples.last(); drawCircle(color, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height)) }
+        drawSeries(downloadSamples, Color(0xFF32A8FF)); drawSeries(uploadSamples, Color(0xFFFFA64D))
     }
 }
-private data class NetworkInfo(val type: String, val connected: Boolean, val signal: String, val link: String, val frequency: String)
+private data class NetworkInfo(val type: String, val connected: Boolean, val signal: String, val quality: String, val link: String, val frequency: String, val note: String)
 @Suppress("DEPRECATION")
 private fun readNetworkInfo(context: Context): NetworkInfo {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -285,7 +281,11 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     }
     val isWifi = type == "Wi-Fi"
     val freq = if (isWifi && info.frequency > 0) (if (info.frequency >= 5925) "6 GHz" else if (info.frequency >= 4900) "5 GHz" else "2.4 GHz") + " (" + info.frequency + " MHz)" else "—"
-    return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (isWifi && info.networkId != -1) info.rssi.toString() + " dBm" else "—", if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq)
+    val hasWifiInfo = isWifi && info.networkId != -1 && info.rssi != -127
+    val rssi = if (hasWifiInfo) info.rssi else 0
+    val quality = when { !hasWifiInfo -> "Unavailable"; rssi >= -50 -> "Excellent"; rssi >= -60 -> "Very good"; rssi >= -67 -> "Good"; rssi >= -75 -> "Fair"; else -> "Weak" }
+    val note = when { !isWifi -> "Wi-Fi is not the active network"; !hasWifiInfo -> "Android did not expose Wi-Fi RSSI"; else -> "RSSI is an Android-reported estimate and may fluctuate" }
+    return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note)
 }
 private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double)
 private object SpeedEngine {
