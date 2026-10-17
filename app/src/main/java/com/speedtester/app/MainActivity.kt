@@ -827,7 +827,7 @@ private fun ServerMapView(
                 if (previousTag?.first != tileStyle) {
                     val source = when (tileStyle) {
                         "Topographic" -> TileSourceFactory.USGS_TOPO
-                        "Cycle" -> TileSourceFactory.CYCLE
+                        "Satellite" -> TileSourceFactory.USGS_SAT
                         else -> TileSourceFactory.MAPNIK
                     }
                     map.setTileSource(source)
@@ -876,7 +876,7 @@ private fun ServerMapView(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf("Standard", "Topographic", "Cycle").forEach { style ->
+            listOf("Standard", "Topographic", "Satellite").forEach { style ->
                 TextButton(
                     onClick = { tileStyle = style },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
