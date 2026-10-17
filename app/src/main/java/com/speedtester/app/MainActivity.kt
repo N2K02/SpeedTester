@@ -269,10 +269,28 @@ private fun SpeedTesterApp(context: Context) {
                                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             }
                             if (updateDownloading) {
-                                LinearProgressIndicator(progress = { updateProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                                 val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
-                                val totalText = if (updateTotalBytes > 0L) String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0) else "unknown size"
-                                Text(if (updateTotalBytes > 0L) "Downloaded ${(updateProgress * 100).toInt()}% · $downloadedText / $totalText" else "Downloaded $downloadedText / $totalText", color = Teal, style = MaterialTheme.typography.bodySmall)
+                                if (updateTotalBytes > 0L) {
+                                    LinearProgressIndicator(
+                                        progress = { updateProgress.coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    val totalText = String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0)
+                                    Text(
+                                        "Downloaded ${(updateProgress * 100).toInt()}% · $downloadedText / $totalText",
+                                        color = Teal,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                } else {
+                                    // Match CallCompanion: stay indeterminate until the download size is known.
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    Text(
+                                        if (updateDownloadedBytes == 0L) "Preparing download…"
+                                        else "Downloading update… $downloadedText · size unknown",
+                                        color = Teal,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                             Button(onClick = {
                                 scope.launch {
