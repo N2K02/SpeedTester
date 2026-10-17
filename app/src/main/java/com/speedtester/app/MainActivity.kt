@@ -173,6 +173,7 @@ private fun SpeedTesterApp(context: Context) {
     var updateUrl by remember { mutableStateOf("") }
     var updateAvailable by remember { mutableStateOf(false) }
     var updateDownloading by remember { mutableStateOf(false) }
+    var updateChecking by remember { mutableStateOf(false) }
     var updateProgress by remember { mutableFloatStateOf(0f) }
     var updateDownloadedBytes by remember { mutableLongStateOf(0L) }
     var updateTotalBytes by remember { mutableLongStateOf(-1L) }
@@ -245,12 +246,103 @@ private fun SpeedTesterApp(context: Context) {
                         icon = { Icon(Icons.Default.Bolt, null) },
                         label = { Text("Server") }
                     )
-                    NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
                 }
             }, containerColor = Color(0xFF0B1117)
         ) { padding ->
             when (activeTab) {
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
+                    item {
+                        UpdateSectionCard("Show update", "Check for the latest SpeedTester release") {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Icon(Icons.Default.Update, null, tint = Teal, modifier = Modifier.size(28.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("SpeedTester", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                    Text("Installed version ${BuildConfig.VERSION_NAME}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            if (updateVersion.isNotBlank()) {
+                                HorizontalDivider(color = Color(0xFF26343E))
+                                InfoRow("Latest version", updateVersion)
+                            }
+                            Text(updateMessage, color = Muted, style = MaterialTheme.typography.bodyMedium)
+                            if (updateChecking) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                            if (updateDownloading) {
+                                LinearProgressIndicator(progress = { updateProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                                val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
+                                val totalText = if (updateTotalBytes > 0L) String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0) else "unknown size"
+                                Text(if (updateTotalBytes > 0L) "Downloaded ${(updateProgress * 100).toInt()}% · $downloadedText / $totalText" else "Downloaded $downloadedText / $totalText", color = Teal, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Button(onClick = {
+                                scope.launch {
+                                    updateChecking = true
+                                    updateAvailable = false
+                                    updateDiagnostics = ""
+                                    updateDiagnosticsVisible = false
+                                    updateMessage = "Checking GitHub Releases…"
+                                    try {
+                                        val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
+                                        updateVersion = result.version
+                                        updateUrl = result.apkUrl
+                                        updateAvailable = result.available
+                                        updateDiagnostics = result.diagnostics
+                                        updateMessage = result.message
+                                    } finally {
+                                        updateChecking = false
+                                    }
+                                }
+                            }, enabled = !updateChecking && !updateDownloading, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (updateChecking) "Checking…" else "Check for updates")
+                            }
+                            if (updateAvailable && updateUrl.isNotBlank()) {
+                                Button(onClick = {
+                                    if (!updateDownloading) scope.launch {
+                                        updateDownloading = true
+                                        updateProgress = 0f
+                                        updateDownloadedBytes = 0L
+                                        updateTotalBytes = -1L
+                                        updateDiagnostics = ""
+                                        updateDiagnosticsVisible = false
+                                        updateMessage = "Preparing update download…"
+                                        val result = withContext(Dispatchers.IO) {
+                                            UpdateChecker.downloadAndInstall(context, updateUrl) { downloaded, total ->
+                                                scope.launch {
+                                                    updateDownloadedBytes = downloaded
+                                                    updateTotalBytes = total
+                                                    if (total > 0L) updateProgress = (downloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                                                    updateMessage = if (total > 0L) "Downloading update… ${(downloaded * 100 / total).coerceIn(0L, 100L)}%" else "Downloading update…"
+                                                }
+                                            }
+                                        }
+                                        if (result.startsWith("Update failed:")) {
+                                            updateDiagnostics = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: APK download/install\nAPK URL: " + updateUrl + "\nError: " + result
+                                            updateMessage = "Update failed. Tap Show details for diagnostics."
+                                        } else {
+                                            updateMessage = result
+                                            if (result.startsWith("Allow installs")) updateDiagnostics = "App: SpeedTester\nStage: Install permission\nAPK URL: " + updateUrl + "\n" + result
+                                        }
+                                        updateDiagnosticsVisible = false
+                                        updateDownloading = false
+                                    }
+                                }, enabled = !updateDownloading, modifier = Modifier.fillMaxWidth()) {
+                                    Text(if (updateDownloading) "Downloading…" else "Download and install")
+                                }
+                            }
+                            if (updateDiagnostics.isNotBlank()) {
+                                TextButton(onClick = { updateDiagnosticsVisible = !updateDiagnosticsVisible }) {
+                                    Text(if (updateDiagnosticsVisible) "Hide details" else "Show details")
+                                }
+                                if (updateDiagnosticsVisible) {
+                                    Text(updateDiagnostics, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    OutlinedButton(onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        clipboard?.setPrimaryClip(ClipData.newPlainText("Update diagnostics", updateDiagnostics))
+                                    }, modifier = Modifier.fillMaxWidth()) { Text("Copy diagnostics") }
+                                }
+                            }
+                        }
+                    }
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -615,102 +707,8 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                3 -> LazyColumn(
-                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
-                ) {
-                    item { Text("App updates", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
-                    item {
-                        UpdateSectionCard("Update status", "Current installation and latest release") {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Icon(Icons.Default.Update, null, tint = Teal, modifier = Modifier.size(30.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("SpeedTester", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                                    Text("Installed version ${BuildConfig.VERSION_NAME}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                            if (updateVersion.isNotBlank()) {
-                                HorizontalDivider(color = Color(0xFF26343E))
-                                InfoRow("Latest version", updateVersion)
-                            }
-                            Text(updateMessage, color = Muted, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                    if (updateDownloading) {
-                        item {
-                            UpdateSectionCard("Download progress", "APK download progress") {
-                                LinearProgressIndicator(progress = { updateProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                                val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
-                                val totalText = if (updateTotalBytes > 0L) String.format(java.util.Locale.US, "%.2f MB", updateTotalBytes / 1048576.0) else "unknown size"
-                                Text(if (updateTotalBytes > 0L) "Downloaded ${(updateProgress * 100).toInt()}% · $downloadedText / $totalText" else "Downloaded $downloadedText / $totalText", color = Teal, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                    item {
-                        UpdateSectionCard("Update actions", "Check for a release or install the latest APK") {
-                            Button(onClick = {
-                                scope.launch {
-                                    updateDiagnostics = ""
-                                    updateDiagnosticsVisible = false
-                                    updateMessage = "Checking GitHub Releases…"
-                                    val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
-                                    updateVersion = result.version
-                                    updateUrl = result.apkUrl
-                                    updateAvailable = result.available
-                                    updateDiagnostics = result.diagnostics
-                                    updateMessage = result.message
-                                }
-                            }, enabled = !updateDownloading, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
-                            if (updateAvailable && updateUrl.isNotBlank()) {
-                                Button(onClick = {
-                                    if (!updateDownloading) scope.launch {
-                                        updateDownloading = true
-                                        updateProgress = 0f
-                                        updateDownloadedBytes = 0L
-                                        updateTotalBytes = -1L
-                                        updateDiagnostics = ""
-                                        updateDiagnosticsVisible = false
-                                        updateMessage = "Preparing update download…"
-                                        val result = withContext(Dispatchers.IO) {
-                                            UpdateChecker.downloadAndInstall(context, updateUrl) { downloaded, total ->
-                                                scope.launch {
-                                                    updateDownloadedBytes = downloaded
-                                                    updateTotalBytes = total
-                                                    if (total > 0L) updateProgress = (downloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                                                    updateMessage = if (total > 0L) "Downloading update… ${(downloaded * 100 / total).coerceIn(0L, 100L)}%" else "Downloading update…"
-                                                }
-                                            }
-                                        }
-                                        if (result.startsWith("Update failed:")) {
-                                            updateDiagnostics = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: APK download/install\nAPK URL: " + updateUrl + "\nError: " + result
-                                            updateMessage = "Update failed. Tap Show details for diagnostics."
-                                        } else {
-                                            updateMessage = result
-                                            if (result.startsWith("Allow installs")) updateDiagnostics = "App: SpeedTester\nStage: Install permission\nAPK URL: " + updateUrl + "\n" + result
-                                        }
-                                        updateDiagnosticsVisible = false
-                                        updateDownloading = false
-                                    }
-                                }, enabled = !updateDownloading, modifier = Modifier.fillMaxWidth()) { Text(if (updateDownloading) "Downloading…" else "Download and install") }
-                            }
-                        }
-                    }
-                    if (updateDiagnostics.isNotBlank()) {
-                        item {
-                            UpdateSectionCard("Troubleshooting", "Optional technical details for update failures") {
-                                TextButton(onClick = { updateDiagnosticsVisible = !updateDiagnosticsVisible }) { Text(if (updateDiagnosticsVisible) "Hide details" else "Show details") }
-                                if (updateDiagnosticsVisible) {
-                                    Text(updateDiagnostics, color = Muted, style = MaterialTheme.typography.bodySmall)
-                                    OutlinedButton(onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                        clipboard?.setPrimaryClip(ClipData.newPlainText("Update diagnostics", updateDiagnostics))
-                                    }, modifier = Modifier.fillMaxWidth()) { Text("Copy diagnostics") }
-                                }
-                            }
-                        }
-                    }
-                }
+
+
             }
         }
     }
