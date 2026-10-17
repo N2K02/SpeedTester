@@ -90,17 +90,33 @@ private fun SpeedTesterApp(context: Context) {
     var selectedServer by remember { mutableStateOf<NdtServerCandidate?>(null) }
     var serversLoading by remember { mutableStateOf(false) }
     var serversError by remember { mutableStateOf("") }
+    var serverDiscoveryMs by remember { mutableLongStateOf(-1L) }
+    var serverDiscoveryStatus by remember { mutableStateOf("Not started") }
     var serverSearch by remember { mutableStateOf("") }
     var serverPage by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         serversLoading = true
         serversError = ""
+        serverDiscoveryStatus = "Discovering Mauritius servers…"
+        val discoveryStarted = System.nanoTime()
         try {
             availableServers = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
-            if (availableServers.isEmpty()) serversError = "No HTTPS-compatible Ookla test servers were found in Mauritius. Try Refresh; only country code MU is shown."
+            serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
+            if (availableServers.isEmpty()) {
+                serversError = "No HTTPS-compatible Ookla test servers were found in Mauritius. Try Refresh; only country code MU is shown."
+                serverDiscoveryStatus = "No compatible servers found"
+            } else serverDiscoveryStatus = "Complete · ${availableServers.size} Mauritius servers"
         } catch (e: Exception) {
             serversError = e.message ?: "Unable to discover compatible servers"
+            serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
+            serverDiscoveryStatus = "Failed"
         } finally { serversLoading = false }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            netInfo = readNetworkInfo(context)
+            kotlinx.coroutines.delay(2500)
+        }
     }
     val filteredServers = remember(availableServers, serverSearch) {
         availableServers.filter { candidate ->
@@ -143,8 +159,6 @@ private fun SpeedTesterApp(context: Context) {
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
-    var serverDiscoveryMs by remember { mutableLongStateOf(-1L) }
-    var serverDiscoveryStatus by remember { mutableStateOf("Not run yet") }
     LaunchedEffect(activeTab, serverDetails.city, serverDetails.country, serverDetails.latitude, serverDetails.longitude) {
         if (activeTab == 2 && serverDetails.latitude == null && serverDetails.longitude == null && serverDetails.city.isNotBlank()) {
             val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(serverDetails.city, serverDetails.country) }
@@ -206,14 +220,22 @@ private fun SpeedTesterApp(context: Context) {
                                     }
                                     TextButton(onClick = {
                                         scope.launch {
-                                            serversLoading = true; serversError = ""
+                                            serversLoading = true; serversError = ""; serverDiscoveryStatus = "Refreshing Mauritius server directory…"
+                                            val discoveryStarted = System.nanoTime()
                                             try {
                                                 val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
                                                 availableServers = refreshed
-                                                if (refreshed.isEmpty()) serversError = "No HTTPS-compatible Ookla servers were found in Mauritius. The directory may not currently list a local server."
+                                                serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
+                                                if (refreshed.isEmpty()) {
+                                                    serversError = "No HTTPS-compatible Ookla servers were found in Mauritius. The directory may not currently list a local server."
+                                                    serverDiscoveryStatus = "No compatible servers found"
+                                                } else serverDiscoveryStatus = "Complete · ${refreshed.size} Mauritius servers"
                                                 if (selectedServer != null && refreshed.none { it.host == selectedServer?.host }) selectedServer = null
-                                            } catch (e: Exception) { serversError = e.message ?: "Server refresh failed" }
-                                            finally { serversLoading = false }
+                                            } catch (e: Exception) {
+                                                serversError = e.message ?: "Server refresh failed"
+                                                serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
+                                                serverDiscoveryStatus = "Failed"
+                                            } finally { serversLoading = false }
                                         }
                                     }, enabled = !serversLoading && !testing) { Text("Refresh") }
                                 }
@@ -267,9 +289,26 @@ private fun SpeedTesterApp(context: Context) {
                                     Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", liveJitter.takeIf { it > 0 } ?: jitter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("JITTER", color = Muted, style = MaterialTheme.typography.labelMedium); Text("ms", color = Muted, style = MaterialTheme.typography.labelSmall) }
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.fillMaxWidth().height(170.dp))
-                                Text("Scale: 0–${max(10f, (downloadSamples + uploadSamples).maxOrNull() ?: 10f).toInt()} Mbps · live rolling samples", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("━ Download", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall); Text("━ Upload", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall); Text("Live · Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                val chartMax = max(10f, (downloadSamples + uploadSamples).maxOrNull() ?: 10f)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Column(Modifier.height(170.dp).width(34.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
+                                        Text("${chartMax.toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${(chartMax * .75f).toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${(chartMax * .5f).toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${(chartMax * .25f).toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("0", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.weight(1f).height(170.dp))
+                                }
+                                Row(Modifier.fillMaxWidth().padding(start = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Earlier samples", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    Text("Latest sample →", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("━ Download · ${downloadSamples.size} samples", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall)
+                                    Text("━ Upload · ${uploadSamples.size} samples", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall)
+                                }
+                                Text("Vertical axis = Mbps. Samples update about every 250 ms; download and upload are measured in separate phases, so compare each coloured line within its own phase.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                      StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
                                      StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
@@ -282,7 +321,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; serverDiscoveryMs = -1L; serverDiscoveryStatus = "Discovering…"; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                        testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                         diagnosticLog.clear()
                                         logDiagnostic("========== SPEED TEST START ==========")
                                         logDiagnostic("Server directory: Speedtest.net public API · country MU")
@@ -341,15 +380,21 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                InfoRow("Discovery status", serverDiscoveryStatus)
-                                InfoRow("Discovery time", if (serverDiscoveryMs >= 0) "$serverDiscoveryMs ms" else "—")
-                                InfoRow("Test server", serverDetails.host.ifBlank { "Not selected yet" })
-                                InfoRow("Server location", serverDetails.location.ifBlank { "Not available yet" })
-                                InfoRow("Selected-server ping", if (ping >= 0) "$ping ms" else "Measured during test")
-                                Text("Select a Mauritius Ookla-compatible endpoint. Latency is measured from this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                InfoRow("Server discovery", if (serversLoading) "Discovering Mauritius servers…" else serverDiscoveryStatus)
+                                InfoRow("Discovery duration", if (serverDiscoveryMs >= 0) "%.2f s".format(java.util.Locale.US, serverDiscoveryMs / 1000.0) else "—")
+                                InfoRow("Test status", when { testing -> status; selectedServer != null -> "Ready · server selected"; serversLoading -> "Discovering…"; else -> "Select a Mauritius server" })
+                                InfoRow("Test server", selectedServer?.let { "${it.sponsor.ifBlank { "Ookla server" }} · ${it.host}" } ?: serverDetails.host.ifBlank { "Not selected yet" })
+                                InfoRow("Server location", selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }?.ifBlank { null } ?: serverDetails.location.ifBlank { "Not available yet" })
+                                InfoRow("Selected-server TCP ping", if (ping >= 0) "$ping ms" else selectedServer?.latencyMs?.let { "$it ms (directory scan)" } ?: "Measured during test")
+                                Text("Discovery duration measures the Mauritius server-directory lookup. Ping is measured separately against the selected endpoint.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 InfoRow("Protocol", "Ookla-compatible HTTPS transfer")
-                                 InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
-                                InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Signal quality", netInfo.quality); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency / band", netInfo.frequency); InfoRow("Connection note", netInfo.note)
+                                InfoRow("Network", netInfo.type)
+                                InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
+                                InfoRow("Wi-Fi signal", netInfo.signal)
+                                InfoRow("Signal quality", netInfo.quality)
+                                InfoRow("Wi-Fi link speed", netInfo.link)
+                                InfoRow("Frequency / band", netInfo.frequency)
+                                InfoRow("Connection note", netInfo.note)
                             }
                         }
                     }
@@ -725,26 +770,29 @@ private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Do
           var msg = document.getElementById('msg');
           function fail(text) { msg.textContent = text; msg.style.display = 'block'; }
           if (typeof L === 'undefined') { fail('The map library could not be loaded.'); return; }
-          var map = L.map('map').setView([$latitude, $longitude], 5);
+          var map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([$latitude, $longitude], 8);
           var loaded = 0, errors = 0;
           var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 18,
-            attribution: '&copy; OpenStreetMap contributors'
+            minZoom: 2,
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            referrerPolicy: 'strict-origin-when-cross-origin'
           });
           tiles.on('tileload', function () { loaded++; msg.style.display = 'none'; });
           tiles.on('tileerror', function () {
             errors++;
-            if (loaded === 0 && errors >= 3) fail('Map tiles could not be loaded. Check your internet connection.');
+            if (loaded === 0 && errors >= 3) fail('Map tiles were blocked or unavailable. Check your connection or tile access.');
           });
           tiles.addTo(map);
           L.circleMarker([$latitude, $longitude], {
             radius: 9, color: '#EAF2F5', weight: 2,
             fillColor: '#13B8A6', fillOpacity: 1
           }).addTo(map).bindPopup('Mauritius Ookla-compatible test server').openPopup();
-          setTimeout(function () { map.invalidateSize(); }, 300);
+          setTimeout(function () { map.invalidateSize(true); }, 300);
+          window.addEventListener('resize', function () { map.invalidateSize(true); });
           setTimeout(function () {
-            if (loaded === 0) fail('Map is taking too long to load. Check your internet connection and try again.');
-          }, 12000);
+            if (loaded === 0) fail('No map tiles received. The server marker is approximate; try again later.');
+          }, 10000);
         })();
     """.trimIndent()
     return "<!doctype html><html><head><meta charset=\"utf-8\">" +
@@ -766,7 +814,7 @@ private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Do
             settings.loadsImagesAutomatically = true
             settings.blockNetworkImage = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0"
+            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0 (com.speedtester.app)"
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
             webViewClient = WebViewClient()
