@@ -887,8 +887,19 @@ private object SpeedEngine {
 
     suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
         val server = selectedServer ?: error("Select a Mauritius Ookla-compatible server first")
-        val uploadEndpoint = server.uploadUrl
-        val uploadUri = java.net.URI(uploadEndpoint)
+        val rawUploadUri = java.net.URI(server.uploadUrl)
+        // Ookla-hosted servers can advertise a provider alias whose TLS certificate is issued
+        // for the canonical server-ID hostname. Use that certificate-valid hostname; never
+        // disable certificate or hostname verification.
+        val certificateHost = server.serverId.takeIf { it.matches(Regex("\\d+")) }
+            ?.let { "server-$it.prod.hosts.ooklaserver.net" }
+            ?: rawUploadUri.host
+            ?: error("The selected Ookla server URL is invalid")
+        val uploadUri = java.net.URI(
+            rawUploadUri.scheme, rawUploadUri.userInfo, certificateHost, rawUploadUri.port,
+            rawUploadUri.path, rawUploadUri.query, rawUploadUri.fragment
+        )
+        val uploadEndpoint = uploadUri.toString()
         val host = uploadUri.host ?: error("The selected Ookla server URL is invalid")
         val port = if (uploadUri.port > 0) uploadUri.port else 443
         val locationName = listOf(server.sponsor, server.city, server.countryName).filter { it.isNotBlank() }.joinToString(" · ")
@@ -897,8 +908,8 @@ private object SpeedEngine {
         onLog("Country filter: MU (enforced locally)")
         onLog("Selected server ID: " + server.serverId)
         onLog("Sponsor: " + server.sponsor)
-        onLog("Server endpoint: " + uploadEndpoint)
-        onLog("HTTPS-only server: verified by Ookla directory flag")
+        onLog("Server endpoint (certificate-valid Ookla hostname): " + uploadEndpoint)
+        onLog("TLS: normal certificate and hostname verification enabled; no bypass")
         onServer(ServerDetails(server.host, server.city, server.country, server.latitude, server.longitude))
 
         val dnsStart = System.nanoTime()
@@ -920,8 +931,11 @@ private object SpeedEngine {
         val jitter = pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
 
         // Ookla-compatible download endpoint; only HTTPS-capable servers are selected.
+        // Ookla classic servers expose random-size JPEG payloads beside upload.php.
+        // Request the standard transfer path instead of a generic /download URL.
         val downloadUrl = java.net.URI(uploadEndpoint).let { u ->
-            java.net.URI(u.scheme, u.userInfo, u.host, u.port, "/download", "size=1000000000&nocache=" + System.nanoTime(), null).toString()
+            val directory = u.path.substringBeforeLast("/", "")
+            java.net.URI(u.scheme, u.userInfo, u.host, u.port, directory + "/random4000x4000.jpg", "nocache=" + System.nanoTime(), null).toString()
         }
         onLog("Download endpoint: " + downloadUrl)
         onUpdate("Downloading · Ookla server", .08f, 0f)
