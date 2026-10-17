@@ -448,11 +448,11 @@ private object SpeedEngine {
         val downloadRates = mutableListOf<Double>()
         val started = System.nanoTime(); var bytes = 0L; var lastReportNanos = started; var lastReportBytes = 0L
         client.newCall(request).execute().use { response ->
-            onLog("DOWNLOAD response: HTTP ${response.code} ${response.message}; content-type=${response.header("Content-Type") ?: "unknown"}; content-length=${response.header("Content-Length") ?: "unknown"}; server=${response.header("Server") ?: "not disclosed"}")
+            onLog("DOWNLOAD response: HTTP ${response.code} ${response.message}; content-type=${response.header("Content-Type") ?: "unknown"}; content-length=${response.header("Content-Length") ?: "unknown"}; server=${response.header("Server") ?: "not disclosed"}; cf-ray=${response.header("cf-ray") ?: "not provided"}")
             if (!response.isSuccessful) {
                 val bodyPreview = runCatching { response.peekBody(1024).string().replace(Regex("\\s+"), " ").take(500) }.getOrDefault("unavailable")
                 onLog("DOWNLOAD HTTP ERROR body preview: $bodyPreview")
-                error("Download failed: HTTP ${response.code}. URL: ${URL(downloadUrl).host}${URL(downloadUrl).path}. Body: $bodyPreview")
+                error(if (response.code == 403 && cloudflare) "Cloudflare refused the speed-test download (HTTP 403). Try opening https://speed.cloudflare.com in your browser; if it works there but not here, use another LibreSpeed-compatible server. Response: $bodyPreview" else "Download failed: HTTP ${response.code}. URL: ${URL(downloadUrl).host}${URL(downloadUrl).path}. Body: $bodyPreview")
             }
             val stream = response.body?.byteStream() ?: error("Empty download response"); val buffer = ByteArray(32 * 1024)
             while (true) {
