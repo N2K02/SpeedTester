@@ -60,6 +60,15 @@ import kotlin.math.max
 
 private fun Double.finiteOrZero(): Double = if (isFinite()) this else 0.0
 
+private fun formatHistoryDate(raw: String): String {
+    return try {
+        val parsed = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).parse(raw)
+        if (parsed == null) raw else java.text.SimpleDateFormat("dd/MM/yyyy · HH:mm", java.util.Locale.getDefault()).format(parsed)
+    } catch (_: Exception) {
+        raw
+    }
+}
+
 private val Teal = Color(0xFF13B8A6)
 private val Muted = Color(0xFF8A9AA5)
 data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0)
@@ -298,13 +307,38 @@ private fun SpeedTesterApp(context: Context) {
                     if (history.isEmpty()) item { Text("Your completed tests will appear here.", color = Muted) }
                     items(history) { item ->
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Text(item.date, color = Muted, style = MaterialTheme.typography.labelMedium)
-                                Spacer(Modifier.height(6.dp))
-                                Text("↓ %.1f Mbps    ↑ %.1f Mbps".format(item.download, item.upload), fontWeight = FontWeight.Bold)
-                                Text("Ping " + item.ping + " ms  ·  Jitter %.1f ms".format(item.jitter), color = Muted, style = MaterialTheme.typography.bodySmall)
-                                Text("Avg / peak ↓ %.1f / %.1f · ↑ %.1f / %.1f Mbps".format(item.downloadAverage, item.downloadPeak, item.uploadAverage, item.uploadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
-                                Text("Loaded ping " + (if (item.loadedPing >= 0) "${item.loadedPing} ms" else "—") + " · Failed probes ${item.failedProbes}/${item.probeCount}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(formatHistoryDate(item.date), color = Muted, style = MaterialTheme.typography.labelMedium)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("DOWNLOAD", color = Color(0xFF42C9F5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text("%.1f Mbps".format(item.download), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                        Text("Avg %.1f · Peak %.1f".format(item.downloadAverage, item.downloadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("UPLOAD", color = Color(0xFF8BE28B), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text("%.1f Mbps".format(item.upload), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                        Text("Avg %.1f · Peak %.1f".format(item.uploadAverage, item.uploadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                HorizontalDivider(color = Color(0xFF293640))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Ping", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${item.ping} ms", fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Jitter", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("%.1f ms".format(item.jitter), fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Loaded ping", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text(if (item.loadedPing >= 0) "${item.loadedPing} ms" else "—", fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                                Text("Loaded jitter %.1f ms  ·  Failed probes %d/%d".format(item.loadedJitter, item.failedProbes, item.probeCount), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Server", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                Text(item.server.ifBlank { "Server details unavailable" }, style = MaterialTheme.typography.bodySmall)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     TextButton(onClick = { shareTestResult(context, item) }) { Text("Share result") }
                                     Spacer(Modifier.weight(1f))
