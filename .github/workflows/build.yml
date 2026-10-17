@@ -67,6 +67,9 @@ jobs:
             echo "_Built from ${GITHUB_SHA::7}_"
           } > release-notes.md
 
+      - name: Compile and test
+        run: gradle --no-daemon testDebugUnitTest assembleDebug -PappVersion="$VERSION"
+
       - name: Configure signing
         env:
           KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
@@ -79,13 +82,13 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/release.jks"
           echo "SIGNING_STORE_FILE=$RUNNER_TEMP/signing/release.jks" >> "$GITHUB_ENV"
 
-      - name: Build and test
+      - name: Build signed release
         env:
           SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
-          gradle --no-daemon testDebugUnitTest assembleRelease \
+          gradle --no-daemon assembleRelease \
             -PappVersion="$VERSION" \
             -PsigningStoreFile="$SIGNING_STORE_FILE" \
             -PsigningStorePassword="$SIGNING_KEYSTORE_PASSWORD" \
