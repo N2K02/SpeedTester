@@ -12,12 +12,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import org.maplibre.android.MapLibre
-import org.maplibre.android.annotations.MarkerOptions
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.maps.MapView
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -780,11 +779,9 @@ private object ServerGeoLocator {
     InfoRow("Receiver-window limited", info.receiverLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
-private const val MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
-
 /**
- * Native MapLibre map embedded in Compose. This removes the WebView/Leaflet/OSM-raster-tile
- * dependency that was leaving the map blank on some devices.
+ * Native Canvas-based OpenStreetMap view. This intentionally avoids MapLibre's native
+ * OpenGL renderer, which was crashing on some Android 17 devices.
  */
 @Composable
 private fun ServerMapLibreView(
@@ -799,67 +796,60 @@ private fun ServerMapLibreView(
     AndroidView(
         modifier = modifier,
         factory = { viewContext ->
-            MapLibre.getInstance(viewContext)
+            Configuration.getInstance().userAgentValue = viewContext.packageName
             MapView(viewContext).apply {
-                onCreate(null)
+                setTileSource(TileSourceFactory.MAPNIK)
+                setMultiTouchControls(true)
+                controller.setZoom(7.0)
+                controller.setCenter(GeoPoint(originLat, originLon))
                 mapView = this
-                getMapAsync { map ->
-                    map.setStyle(MAP_STYLE_URL) {
-                        val origin = LatLng(originLat, originLon)
-                        val bounds = LatLngBounds.Builder().include(origin)
-                        map.addMarker(
-                            MarkerOptions()
-                                .position(origin)
-                                .title("Distance reference")
-                                .snippet("Used to calculate approximate server distances")
-                        )
-                        var serverMarkerCount = 0
-                        servers.forEach { server ->
-                            val lat = server.latitude
-                            val lon = server.longitude
-                            if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
-                                val point = LatLng(lat, lon)
-                                val distance = server.distanceKm?.let {
-                                    String.format(java.util.Locale.US, "%.1f km away", it)
-                                } ?: "Distance unavailable"
-                                val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
-                                map.addMarker(
-                                    MarkerOptions()
-                                        .position(point)
-                                        .title(server.label)
-                                        .snippet("${server.city}\n$distance · $ping\n${server.host}")
-                                )
-                                bounds.include(point)
-                                serverMarkerCount++
-                            }
-                        }
-                        if (serverMarkerCount > 0) {
-                            map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
-                        } else {
-                            map.moveCamera(CameraUpdateFactory.newLatLngZoom(origin, 7.0))
-                        }
-                    }
-                }
             }
         },
-        update = { }
+        update = { map ->
+            map.overlays.clear()
+            val origin = GeoPoint(originLat, originLon)
+            val originMarker = Marker(map).apply {
+                position = origin
+                title = "Distance reference"
+                snippet = "Used to calculate approximate server distances"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            }
+            map.overlays.add(originMarker)
+            servers.forEach { server ->
+                val lat = server.latitude
+                val lon = server.longitude
+                if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                    val point = GeoPoint(lat, lon)
+                    val distance = server.distanceKm?.let {
+                        String.format(java.util.Locale.US, "%.1f km away", it)
+                    } ?: "Distance unavailable"
+                    val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
+                    map.overlays.add(Marker(map).apply {
+                        position = point
+                        title = server.label
+                        snippet = "${server.city}\n$distance · $ping\n${server.host}"
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    })
+                }
+            }
+            map.invalidate()
+        }
     )
 
     DisposableEffect(lifecycleOwner, mapView) {
         val currentMapView = mapView
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> currentMapView?.onStart()
                 Lifecycle.Event.ON_RESUME -> currentMapView?.onResume()
                 Lifecycle.Event.ON_PAUSE -> currentMapView?.onPause()
-                Lifecycle.Event.ON_STOP -> currentMapView?.onStop()
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            currentMapView?.onDestroy()
+            currentMapView?.onPause()
+            currentMapView?.onDetach()
             if (mapView === currentMapView) mapView = null
         }
     }
