@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
 private fun SpeedTesterApp(context: Context) {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("speedtester", Context.MODE_PRIVATE) }
-    val endpoint = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0"
+    val endpoint = "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=1000&search=Mauritius"
     var availableServers by remember { mutableStateOf<List<NdtServerCandidate>>(emptyList()) }
     var selectedServer by remember { mutableStateOf<NdtServerCandidate?>(null) }
     var serversLoading by remember { mutableStateOf(false) }
@@ -95,7 +95,7 @@ private fun SpeedTesterApp(context: Context) {
         serversError = ""
         try {
             availableServers = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
-            if (availableServers.isEmpty()) serversError = "M-Lab did not report any test servers located in Mauritius. This does not mean My.t or Emtel has no Ookla server; those require a different test engine."
+            if (availableServers.isEmpty()) serversError = "No HTTPS-compatible Ookla test servers were found in Mauritius. Try Refresh; only country code MU is shown."
         } catch (e: Exception) {
             serversError = e.message ?: "Unable to discover compatible servers"
         } finally { serversLoading = false }
@@ -203,7 +203,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text("MAURITIUS TEST SERVERS", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                        Text("Mauritius-only · lowest measured latency first", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        Text("Ookla directory · Mauritius only · lowest latency first", color = Muted, style = MaterialTheme.typography.bodySmall)
                                     }
                                     TextButton(onClick = {
                                         scope.launch {
@@ -211,19 +211,19 @@ private fun SpeedTesterApp(context: Context) {
                                             try {
                                                 val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
                                                 availableServers = refreshed
-                                                if (refreshed.isEmpty()) serversError = "No Mauritius-located M-Lab NDT7 servers were returned. Provider/Ookla servers need a separate compatible test engine."
+                                                if (refreshed.isEmpty()) serversError = "No HTTPS-compatible Ookla servers were found in Mauritius. The directory may not currently list a local server."
                                                 if (selectedServer != null && refreshed.none { it.host == selectedServer?.host }) selectedServer = null
                                             } catch (e: Exception) { serversError = e.message ?: "Server refresh failed" }
                                             finally { serversLoading = false }
                                         }
                                     }, enabled = !serversLoading && !testing) { Text("Refresh") }
                                 }
-                                Text("Only compatible test servers reported in Mauritius are shown. Servers are ranked by measured latency, similar to a speed-test server picker. These are M-Lab NDT7 servers, not a claim that they are hosted by My.t or Emtel.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search server, city, host") }, placeholder = { Text("e.g. Mauritius, Nairobi") })
-                                Text("${filteredServers.size} Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding compatible servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ranked by measured TCP latency. Provider names come from the server directory.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search provider, city, server ID") }, placeholder = { Text("e.g. my.t, Emtel, 4342") })
+                                Text("${filteredServers.size} HTTPS-compatible Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding Mauritius Ookla servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
                                 if (serversError.isNotBlank()) Text(serversError, color = Color(0xFFFFA64D), style = MaterialTheme.typography.bodySmall)
-                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible M-Lab NDT7 servers were found in Mauritius. Overseas servers are excluded. Provider/Ookla servers cannot be tested by the current NDT7 engine.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible Mauritius servers found. Overseas servers are excluded. Check your connection and refresh the server list.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 visibleServers.forEach { candidate ->
                                     val isSelected = selectedServer?.host == candidate.host
                                     Card(
@@ -239,7 +239,7 @@ private fun SpeedTesterApp(context: Context) {
                                                 Text(candidate.label, color = Color.White, fontWeight = FontWeight.SemiBold)
                                                 Text(candidate.host, color = Muted, style = MaterialTheme.typography.labelSmall)
                                                 Text(listOf(candidate.city, candidate.countryName).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Location not provided" }, color = Muted, style = MaterialTheme.typography.bodySmall)
-                                                Text("Distance: ${candidate.distanceKm?.let { "${it.toInt()} km from Mauritius" } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                                Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = Muted, style = MaterialTheme.typography.labelSmall)
                                             }
                                             if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = Teal)
                                         }
@@ -283,10 +283,10 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; serverDiscoveryMs = -1L; serverDiscoveryStatus = "Discovering…"; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Preparing server connection and TCP latency probes"); activityLog.add("Target: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                        testing = true; error = null; progress = 0f; serverDiscoveryMs = -1L; serverDiscoveryStatus = "Discovering…"; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                         diagnosticLog.clear()
                                         logDiagnostic("========== SPEED TEST START ==========")
-                                        logDiagnostic("Target URL: " + endpoint.trim())
+                                        logDiagnostic("Server directory: Speedtest.net public API · country MU")
                                         logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
                                         scope.launch {
@@ -533,7 +533,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Text("CONNECTION PATH", color = Muted, style = MaterialTheme.typography.labelLarge)
                                 InfoRow("DNS resolution", if (dnsLookupMs >= 0L) "Completed in $dnsLookupMs ms" else "Not measured")
                                 InfoRow("TCP connect latency", if (ping >= 0L) "Average $ping ms" else "Not measured")
-                                Text("NDT7 Locate does not expose a hop-by-hop traceroute. These are endpoint diagnostics, not a map of every router between you and M-Lab.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Server diagnostics test the selected Mauritius endpoint; they do not map every router between your device and the server.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 HorizontalDivider(color = Color(0xFF26343E))
                                 Text("YOUR RECENT BASELINE", color = Muted, style = MaterialTheme.typography.labelLarge)
                                 val previous = history.drop(1).take(10)
@@ -862,15 +862,16 @@ private fun assessQuality(download: Double, upload: Double, ping: Long, jitter: 
     val stabilityScore = if (probes <= 0) 5.0 else ((probes - failed).coerceAtLeast(0).toDouble() / probes) * 5.0
     val score = (downScore + upScore + pingScore + jitterScore + loadedScore + stabilityScore).toInt().coerceIn(0, 100)
     val label = when { score >= 85 -> "Excellent"; score >= 70 -> "Very good"; score >= 50 -> "Good"; score >= 30 -> "Fair"; else -> "Needs attention" }
-    return QualityAssessment(score, label, "A SpeedTester estimate based on speed, latency, jitter and stability—not an official M-Lab rating.")
+    return QualityAssessment(score, label, "A SpeedTester estimate based on speed, latency, jitter and stability—not an official Ookla result.")
 }
 private data class NdtServerCandidate(
     val host: String, val city: String, val country: String, val countryName: String,
     val downloadUrl: String, val uploadUrl: String,
     val latitude: Double? = null, val longitude: Double? = null,
-    val distanceKm: Double? = null, val latencyMs: Long? = null
+    val distanceKm: Double? = null, val latencyMs: Long? = null,
+    val serverId: String = "", val sponsor: String = ""
 ) {
-    val label: String get() = "M-Lab NDT7 · " + city.ifBlank { host }
+    val label: String get() = (sponsor.ifBlank { "Ookla server" }) + " · " + city.ifBlank { host } + (if (serverId.isNotBlank()) " (#$serverId)" else "")
 }
 private fun distanceKmFromMauritius(lat: Double?, lon: Double?): Double? {
     if (lat == null || lon == null) return null
@@ -881,150 +882,179 @@ private fun distanceKmFromMauritius(lat: Double?, lon: Double?): Double? {
     return 6371.0 * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
 }
 private object SpeedEngine {
-    private const val LOCATE_URL = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0"
-    private const val PROTOCOL = "net.measurementlab.ndt.v7"
-    private const val TEST_SECONDS = 10.0
-    private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(0, TimeUnit.MILLISECONDS).build()
+    private const val SERVERS_URL = "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=1000"
+    private const val TEST_SECONDS = 8L
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(12, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
 
     suspend fun discoverCandidates(): List<NdtServerCandidate> = withContext(Dispatchers.IO) {
-        // Mauritius-only discovery: never fall back to global or overseas servers.
-        val urls = listOf(LOCATE_URL + "&country=MU&strict=true", LOCATE_URL + "&country=MU")
+        // Search terms improve coverage, but the local country-code check is authoritative.
+        val searches = listOf("Mauritius", "Port Louis", "my.t", "Mauritius Telecom", "Emtel", "CHiLi", "4342", "18685", "30612")
         val found = linkedMapOf<String, NdtServerCandidate>()
-        for (url in urls) {
+        for (term in searches) {
             try {
-                val json = client.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
-                    if (!response.isSuccessful) return@use JSONObject()
-                    JSONObject(response.body?.string() ?: "{}")
+                val url = SERVERS_URL + "&search=" + java.net.URLEncoder.encode(term, "UTF-8")
+                val jsonText = client.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
+                    if (!response.isSuccessful) return@use "[]"
+                    response.body?.string() ?: "[]"
                 }
-                val results = json.optJSONArray("results") ?: continue
-                for (i in 0 until results.length()) {
-                    val result = results.optJSONObject(i) ?: continue
-                    val urlsObject = result.optJSONObject("urls") ?: continue
-                    var down = ""; var up = ""
-                    val keys = urlsObject.keys()
-                    while (keys.hasNext()) {
-                        val key = keys.next()
-                        if (key.startsWith("wss://") && key.contains("ndt/v7/download")) down = urlsObject.optString(key)
-                        if (key.startsWith("wss://") && key.contains("ndt/v7/upload")) up = urlsObject.optString(key)
-                    }
-                    if (!down.startsWith("wss://") || !up.startsWith("wss://")) continue
-                    val host = runCatching { java.net.URI(down).host }.getOrNull().orEmpty()
-                    if (host.isBlank() || found.containsKey(host)) continue
-                    val location = result.optJSONObject("location")
-                    val city = location?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
-                    val country = location?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
-                    // Enforce Mauritius locally even if the locate API ignores the country query.
-                    if (!country.equals("MU", true)) continue
-                    val countryName = when (country.uppercase(java.util.Locale.ROOT)) { "MU" -> "Mauritius"; "MG" -> "Madagascar"; "ZA" -> "South Africa"; "KE" -> "Kenya"; "RE" -> "Réunion"; "SC" -> "Seychelles"; else -> country }
-                    val lat = location?.optString("latitude")?.toDoubleOrNull()
-                    val lon = location?.optString("longitude")?.toDoubleOrNull()
-                    val portValue = runCatching { java.net.URI(down).port }.getOrDefault(-1)
-                    val port = if (portValue > 0) portValue else 443
+                val json = JSONArray(jsonText)
+                for (i in 0 until json.length()) {
+                    val item = json.optJSONObject(i) ?: continue
+                    val country = item.optString("cc").uppercase(java.util.Locale.ROOT)
+                    if (country != "MU") continue
+                    if (item.optInt("https_functional", 0) != 1) continue
+                    val rawUrl = item.optString("url")
+                    if (rawUrl.isBlank()) continue
+                    val secureUrl = runCatching {
+                        val u = java.net.URI(rawUrl)
+                        if (u.host.isNullOrBlank()) "" else java.net.URI("https", u.userInfo, u.host, u.port, u.path, u.query, u.fragment).toString()
+                    }.getOrDefault("")
+                    if (!secureUrl.startsWith("https://")) continue
+                    val parsed = runCatching { java.net.URI(secureUrl) }.getOrNull() ?: continue
+                    val hostPort = item.optString("host").ifBlank { parsed.rawAuthority.orEmpty() }
+                    val host = hostPort.substringBeforeLast(":", hostPort).ifBlank { parsed.host.orEmpty() }
+                    val port = hostPort.substringAfterLast(":", "").toIntOrNull() ?: if (parsed.port > 0) parsed.port else 443
+                    val id = item.optString("id")
+                    val key = id.ifBlank { hostPort }
+                    if (found.containsKey(key)) continue
+                    val city = item.optString("name").takeUnless { it == "null" }.orEmpty()
+                    val sponsor = item.optString("sponsor").takeUnless { it == "null" }.orEmpty()
+                    val lat = item.optString("lat").toDoubleOrNull()
+                    val lon = item.optString("lon").toDoubleOrNull()
                     val latency = runCatching {
                         val started = System.nanoTime()
-                        Socket().use { it.connect(java.net.InetSocketAddress(host, port), 900) }
+                        Socket().use { it.connect(java.net.InetSocketAddress(host, port), 1800) }
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                     }.getOrNull()
-                    found[host] = NdtServerCandidate(host, city, country, countryName, down, up, lat, lon, distanceKmFromMauritius(lat, lon), latency)
-                    if (found.size >= 10) break
+                    found[key] = NdtServerCandidate(
+                        hostPort, city, country, "Mauritius", secureUrl, secureUrl,
+                        lat, lon, distanceKmFromMauritius(lat, lon), latency, id, sponsor
+                    )
                 }
-            } catch (_: Exception) { /* Try the next discovery scope. */ }
-            if (found.size >= 10) break
+            } catch (_: Exception) {
+                // A failed query should not prevent trying other provider/search terms.
+            }
         }
-        found.values.filter { it.country.equals("MU", true) }
-            .sortedWith(compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.host })
-            .take(10)
+        found.values.filter { it.country == "MU" }
+            .sortedWith(compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.sponsor })
+            .take(30)
     }
 
     suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
-        var downUrl = selectedServer?.downloadUrl.orEmpty()
-        var upUrl = selectedServer?.uploadUrl.orEmpty()
-        var locationName = selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }.orEmpty().ifBlank { "location unavailable" }
-        var locationCity = selectedServer?.city.orEmpty()
-        var locationCountry = selectedServer?.country.orEmpty()
-        if (selectedServer == null) {
-            val locateUrl = if (base.contains("locate.measurementlab.net", true)) base else LOCATE_URL
-            onLog("Engine: M-Lab NDT7 over secure WebSockets")
-            onLog("Discovery URL: " + locateUrl)
-            onLog("NDT7 subprotocol: " + PROTOCOL)
-            val discoveryStartedAt = System.nanoTime()
-            val json = client.newCall(Request.Builder().url(locateUrl).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
-                onLog("DISCOVERY HTTP " + response.code + " " + response.message)
-                if (!response.isSuccessful) error("M-Lab discovery failed: HTTP " + response.code)
-                JSONObject(response.body?.string() ?: error("M-Lab returned an empty response"))
-            }
-            val discoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStartedAt)
-            onLog("DISCOVERY TIME: " + discoveryMs + "ms")
-            val results = json.optJSONArray("results") ?: error("M-Lab discovery returned no server results")
-            for (i in 0 until results.length()) {
-                val result = results.optJSONObject(i) ?: continue
-                val urls = result.optJSONObject("urls") ?: continue
-                var d = ""; var u = ""
-                val keys = urls.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    if (key.startsWith("wss://") && key.contains("ndt/v7/download")) d = urls.optString(key)
-                    if (key.startsWith("wss://") && key.contains("ndt/v7/upload")) u = urls.optString(key)
-                }
-                if (d.startsWith("wss://") && u.startsWith("wss://")) {
-                    downUrl = d; upUrl = u
-                    val loc = result.optJSONObject("location")
-                    locationCity = loc?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
-                    locationCountry = loc?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
-                    locationName = listOf(locationCity, locationCountry).filter { it.isNotBlank() }.joinToString(", ").ifBlank { locationName }
-                    break
-                }
-            }
-        } else {
-            onLog("Engine: M-Lab NDT7 using the server selected in the Mauritius selector")
-            onLog("Selected server endpoint: " + selectedServer.host)
-            onLog("Selected server latency: " + (selectedServer.latencyMs?.let { "$it ms" } ?: "not measured"))
-        }
-        if (downUrl.isBlank() || upUrl.isBlank()) error("No usable secure NDT7 server was selected or discovered")
-        onLog("DISCOVERY STATUS: success")
-        val uri = java.net.URI(downUrl)
-        val host = uri.host ?: error("M-Lab returned an invalid server URL")
-        val port = if (uri.port > 0) uri.port else 443
-        onLog("Selected server: " + host + " (" + locationName + ")")
-        onServer(ServerDetails(host, locationCity, locationCountry))
-        onLog("Download URL: " + downUrl)
-        onLog("Upload URL: " + upUrl)
-        onLog("Download and upload each run for up to 10 seconds")
+        val server = selectedServer ?: error("Select a Mauritius Ookla-compatible server first")
+        val uploadEndpoint = server.uploadUrl
+        val uploadUri = java.net.URI(uploadEndpoint)
+        val host = uploadUri.host ?: error("The selected Ookla server URL is invalid")
+        val port = if (uploadUri.port > 0) uploadUri.port else 443
+        val locationName = listOf(server.sponsor, server.city, server.countryName).filter { it.isNotBlank() }.joinToString(" · ")
+        onLog("Engine: Ookla-compatible HTTPS transfer test")
+        onLog("Discovery: Speedtest.net public server directory")
+        onLog("Country filter: MU (enforced locally)")
+        onLog("Selected server ID: " + server.serverId)
+        onLog("Sponsor: " + server.sponsor)
+        onLog("Server endpoint: " + uploadEndpoint)
+        onLog("HTTPS-only server: verified by Ookla directory flag")
+        onServer(ServerDetails(server.host, server.city, server.country, server.latitude, server.longitude))
 
         val dnsStart = System.nanoTime()
         val resolvedAddress = runCatching { InetAddress.getAllByName(host).firstOrNull()?.hostAddress.orEmpty() }.getOrDefault("")
         val dnsLookupMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - dnsStart)
         onLog("DNS lookup: " + (resolvedAddress.ifBlank { "failed" }) + " in " + dnsLookupMs + "ms")
         val pings = mutableListOf<Long>()
-        repeat(10) { index ->
+        repeat(8) { index ->
             val started = System.nanoTime()
-            try {
-                Socket().use { it.connect(java.net.InetSocketAddress(host, port), 3000) }
-                val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
-                pings.add(ms)
-                onLog("TCP probe " + (index + 1) + "/10 OK: " + ms + "ms")
-            } catch (e: Exception) {
-                onLog("TCP probe " + (index + 1) + "/10 FAILED: " + e.javaClass.simpleName + ": " + e.message)
-                throw e
-            }
+            Socket().use { it.connect(java.net.InetSocketAddress(host, port), 3000) }
+            val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            pings.add(ms)
+            onLog("TCP latency probe " + (index + 1) + "/8: " + ms + "ms")
             onMetrics(pings.average().toLong(), if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0)
-            onUpdate("Measuring latency", .02f + .06f * pings.size / 10f, 0f)
-            kotlinx.coroutines.delay(180)
+            onUpdate("Measuring latency", .02f + .06f * pings.size / 8f, 0f)
+            kotlinx.coroutines.delay(100)
         }
         val ping = pings.average().toLong()
         val jitter = pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
-        onUpdate("Downloading · M-Lab NDT7", .08f, 0f)
-        val down = kotlinx.coroutines.withTimeout(15_000L) {
-            runNdtWebSocket(downUrl, false) { fraction, mbps -> onUpdate("Downloading · M-Lab NDT7", (.08f + .42f * fraction).coerceIn(.08f, .50f), mbps) }
+
+        // Ookla-compatible download endpoint; only HTTPS-capable servers are selected.
+        val downloadUrl = java.net.URI(uploadEndpoint).let { u ->
+            java.net.URI(u.scheme, u.userInfo, u.host, u.port, "/download", "size=1000000000&nocache=" + System.nanoTime(), null).toString()
         }
-        onLog("DOWNLOAD: bytes=" + down.bytes + ", elapsed=" + "%.2f".format(java.util.Locale.US, down.elapsedSeconds) + "s, average=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, peak=" + "%.2f".format(java.util.Locale.US, down.peakMbps) + " Mbps")
-        down.tcpInfo?.let { onLog("DOWNLOAD TCP_INFO: minRTT=" + (it.minRttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms RTT=" + (it.rttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms retrans=" + (it.retransmissionPercent?.let { v -> "%.3f".format(java.util.Locale.US, v) + "%" } ?: "n/a")) }
-        onUpdate("Uploading · M-Lab NDT7", .55f, 0f)
-        val up = kotlinx.coroutines.withTimeout(15_000L) {
-            runNdtWebSocket(upUrl, true) { fraction, mbps -> onUpdate("Uploading · M-Lab NDT7", (.55f + .40f * fraction).coerceIn(.55f, .95f), mbps) }
+        onLog("Download endpoint: " + downloadUrl)
+        onUpdate("Downloading · Ookla server", .08f, 0f)
+        val downStart = System.nanoTime()
+        var downBytes = 0L
+        var downLastAt = downStart
+        var downLastBytes = 0L
+        var downPeak = 0.0
+        val downCall = client.newCall(Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
+        val downResponse = withTimeout(12_000L) { withContext(Dispatchers.IO) { downCall.execute() } }
+        downResponse.use { response ->
+            if (!response.isSuccessful) error("Ookla download endpoint returned HTTP " + response.code + ". This server may not support the compatible transfer endpoint.")
+            val body = response.body ?: error("Ookla download endpoint returned an empty response")
+            body.byteStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while ((System.nanoTime() - downStart) < TimeUnit.SECONDS.toNanos(TEST_SECONDS)) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    downBytes += count
+                    val now = System.nanoTime()
+                    val elapsed = (now - downStart) / 1_000_000_000.0
+                    if (now - downLastAt >= 250_000_000L) {
+                        val instant = (downBytes - downLastBytes) * 8.0 / ((now - downLastAt) / 1_000_000_000.0) / 1_000_000.0
+                        downPeak = maxOf(downPeak, instant)
+                        onUpdate("Downloading · Ookla server", (.08f + .42f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.08f, .50f), instant)
+                        downLastAt = now; downLastBytes = downBytes
+                    }
+                }
+            }
         }
-        onLog("UPLOAD: bytes=" + up.bytes + ", elapsed=" + "%.2f".format(java.util.Locale.US, up.elapsedSeconds) + "s, average=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, peak=" + "%.2f".format(java.util.Locale.US, up.peakMbps) + " Mbps")
-        up.tcpInfo?.let { onLog("UPLOAD TCP_INFO: minRTT=" + (it.minRttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms RTT=" + (it.rttUs?.let { v -> "%.2f".format(java.util.Locale.US, v / 1000.0) } ?: "n/a") + "ms retrans=" + (it.retransmissionPercent?.let { v -> "%.3f".format(java.util.Locale.US, v) + "%" } ?: "n/a")) }
+        val downElapsed = ((System.nanoTime() - downStart) / 1_000_000_000.0).coerceAtLeast(.001)
+        val downMbps = downBytes * 8.0 / downElapsed / 1_000_000.0
+        if (downBytes <= 0L) error("The selected server returned no download data")
+        onLog("DOWNLOAD: bytes=$downBytes, elapsed=" + "%.2f".format(java.util.Locale.US, downElapsed) + "s, average=" + "%.2f".format(java.util.Locale.US, downMbps) + " Mbps")
+        val down = NdtMeasurement(downMbps, downMbps, maxOf(downPeak, downMbps), downBytes, downElapsed, null)
+
+        onUpdate("Uploading · Ookla server", .55f, 0f)
+        val uploadBytes = ByteArray(4 * 1024 * 1024).also { java.security.SecureRandom().nextBytes(it) }
+        var totalUpBytes = 0L
+        val upStart = System.nanoTime()
+        var upPeak = 0.0
+        var upLastAt = upStart
+        var upLastBytes = 0L
+        while ((System.nanoTime() - upStart) < TimeUnit.SECONDS.toNanos(TEST_SECONDS)) {
+            val nonce = java.util.UUID.randomUUID().toString()
+            val requestUrl = java.net.URI(uploadEndpoint).let { u ->
+                java.net.URI(u.scheme, u.userInfo, u.host, u.port, u.path, "nocache=$nonce", null).toString()
+            }
+            val body = object : okhttp3.RequestBody() {
+                override fun contentType() = "application/octet-stream".toMediaType()
+                override fun contentLength() = uploadBytes.size.toLong()
+                override fun writeTo(sink: okio.BufferedSink) { sink.write(uploadBytes) }
+            }
+            val request = Request.Builder().url(requestUrl).post(body).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build()
+            val response = client.newCall(request).execute()
+            response.use { if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code) }
+            totalUpBytes += uploadBytes.size
+            val now = System.nanoTime()
+            val elapsed = (now - upStart) / 1_000_000_000.0
+            if (now - upLastAt >= 250_000_000L) {
+                val instant = (totalUpBytes - upLastBytes) * 8.0 / ((now - upLastAt) / 1_000_000_000.0) / 1_000_000.0
+                upPeak = maxOf(upPeak, instant)
+                onUpdate("Uploading · Ookla server", (.55f + .40f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.55f, .95f), instant)
+                upLastAt = now; upLastBytes = totalUpBytes
+            }
+        }
+        val upElapsed = ((System.nanoTime() - upStart) / 1_000_000_000.0).coerceAtLeast(.001)
+        val upMbps = totalUpBytes * 8.0 / upElapsed / 1_000_000.0
+        if (totalUpBytes <= 0L) error("The selected server accepted no upload data")
+        onLog("UPLOAD: bytes=$totalUpBytes, elapsed=" + "%.2f".format(java.util.Locale.US, upElapsed) + "s, average=" + "%.2f".format(java.util.Locale.US, upMbps) + " Mbps")
+        val up = NdtMeasurement(upMbps, upMbps, maxOf(upPeak, upMbps), totalUpBytes, upElapsed, null)
+
         onUpdate("Checking connection stability", .96f, 0f)
         val loaded = mutableListOf<Long>()
         var failed = 0
@@ -1036,117 +1066,12 @@ private object SpeedEngine {
             } catch (_: Exception) { failed++ }
             kotlinx.coroutines.delay(100)
         }
-        onLog("STABILITY probes: successful=" + loaded.size + "/5 failed=" + failed)
         val loadedPing = if (loaded.isNotEmpty()) loaded.average().toLong() else -1L
         val loadedJitter = if (loaded.size > 1) loaded.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
-        onLog("NDT7 server: " + host + " (" + locationName + ")")
+        onLog("Ookla-compatible server: " + server.host + " (" + locationName + ")")
         onUpdate("Complete", 1f, 0f)
-        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, down.tcpInfo, up.tcpInfo, resolvedAddress, dnsLookupMs)
+        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, null, null, resolvedAddress, dnsLookupMs)
     }
-
-    private suspend fun runNdtWebSocket(url: String, isUpload: Boolean, onProgress: (Float, Float) -> Unit): NdtMeasurement =
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
-            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                val bytes = java.util.concurrent.atomic.AtomicLong(0L)
-                val startedAt = java.util.concurrent.atomic.AtomicLong(0L)
-                val lastAt = java.util.concurrent.atomic.AtomicLong(0L)
-                val lastBytes = java.util.concurrent.atomic.AtomicLong(0L)
-                val finished = java.util.concurrent.atomic.AtomicBoolean(false)
-                val rates = java.util.Collections.synchronizedList(mutableListOf<Double>())
-                val socketRef = java.util.concurrent.atomic.AtomicReference<okhttp3.WebSocket?>(null)
-                val latestTcpInfo = java.util.concurrent.atomic.AtomicReference<NdtTcpInfo?>(null)
-                fun optionalLong(json: JSONObject, key: String): Long? = if (json.has(key) && !json.isNull(key)) json.optLong(key).takeIf { it >= 0L } else null
-                fun parseServerMeasurement(text: String) {
-                    runCatching {
-                        val tcp = JSONObject(text).optJSONObject("TCPInfo") ?: return@runCatching
-                        latestTcpInfo.set(NdtTcpInfo(
-                            minRttUs = optionalLong(tcp, "MinRTT"), rttUs = optionalLong(tcp, "RTT"), rttVarUs = optionalLong(tcp, "RTTVar"),
-                            bytesRetrans = optionalLong(tcp, "BytesRetrans"), bytesSent = optionalLong(tcp, "BytesSent"), bytesAcked = optionalLong(tcp, "BytesAcked"),
-                            busyTimeUs = optionalLong(tcp, "BusyTime"), receiverLimitedUs = optionalLong(tcp, "RWndLimited"), senderLimitedUs = optionalLong(tcp, "SndBufLimited")
-                        ))
-                    }
-                }
-
-                fun finish(problem: Throwable? = null) {
-                    if (!finished.compareAndSet(false, true)) return
-                    val start = startedAt.get()
-                    val seconds = if (start > 0L) (System.nanoTime() - start).coerceAtLeast(1L) / 1_000_000_000.0 else 0.0
-                    val pending = if (isUpload) socketRef.get()?.queueSize() ?: 0L else 0L
-                    val transferred = (bytes.get() - pending).coerceAtLeast(0L)
-                    if (problem != null) {
-                        if (continuation.isActive) continuation.resumeWithException(problem)
-                    } else if (transferred <= 0L || seconds <= 0.0) {
-                        if (continuation.isActive) continuation.resumeWithException(IllegalStateException("NDT7 " + (if (isUpload) "upload" else "download") + " transferred no data"))
-                    } else {
-                        val finalRate = transferred * 8.0 / seconds / 1_000_000.0
-                        val samples = synchronized(rates) { rates.toList() }
-                        val average = if (samples.isEmpty()) finalRate else samples.average()
-                        val peak = samples.maxOrNull() ?: finalRate
-                        if (continuation.isActive) continuation.resume(NdtMeasurement(finalRate, average, peak, transferred, seconds, latestTcpInfo.get()))
-                    }
-                }
-
-                fun report() {
-                    val start = startedAt.get()
-                    if (start <= 0L || finished.get()) return
-                    val now = System.nanoTime()
-                    val oldTime = lastAt.get()
-                    if (now - oldTime < 200_000_000L) return
-                    val current = bytes.get()
-                    val elapsed = (now - oldTime).coerceAtLeast(1L) / 1_000_000_000.0
-                    val rate = (current - lastBytes.get()).coerceAtLeast(0L) * 8.0 / elapsed / 1_000_000.0
-                    if (rate > 0.0) rates.add(rate)
-                    lastAt.set(now)
-                    lastBytes.set(current)
-                    onProgress(((now - start).toDouble() / 1_000_000_000.0 / TEST_SECONDS).toFloat().coerceIn(0f, 1f), rate.toFloat())
-                }
-
-                val request = Request.Builder().url(url).header("Sec-WebSocket-Protocol", PROTOCOL).header("User-Agent", "SpeedTester-Android/1.0").build()
-                val listener = object : okhttp3.WebSocketListener() {
-                    override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
-                        val openedAt = System.nanoTime()
-                        startedAt.set(openedAt); lastAt.set(openedAt); lastBytes.set(0L)
-                        if (isUpload) {
-                            client.dispatcher.executorService.execute {
-                                val payload = ByteArray(16 * 1024).also { java.security.SecureRandom().nextBytes(it) }
-                                val frame = okio.ByteString.of(*payload)
-                                while (!finished.get() && System.nanoTime() - openedAt < TimeUnit.SECONDS.toNanos(10)) {
-                                    if (webSocket.queueSize() < 1_000_000L) {
-                                        if (webSocket.send(frame)) bytes.addAndGet(frame.size.toLong()) else break
-                                    } else {
-                                        try { Thread.sleep(2L) } catch (_: InterruptedException) { break }
-                                    }
-                                    report()
-                                }
-                                if (!finished.get()) {
-                                    webSocket.close(1000, "NDT7 upload complete")
-                                    finish()
-                                }
-                            }
-                        }
-                    }
-                    override fun onMessage(webSocket: okhttp3.WebSocket, data: okio.ByteString) {
-                        if (!isUpload) { bytes.addAndGet(data.size.toLong()); report() }
-                    }
-                    override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
-                        parseServerMeasurement(text)
-                    }
-                    override fun onClosing(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
-                        webSocket.close(code, reason)
-                        finish(if (code == 1000) null else IllegalStateException("NDT7 server closed with code " + code + ": " + reason))
-                    }
-                    override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
-                        finish(if (code == 1000) null else IllegalStateException("NDT7 server closed with code " + code + ": " + reason))
-                    }
-                    override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
-                        val detail = if (response != null) "HTTP " + response.code + " " + response.message else (t.message ?: t.javaClass.simpleName)
-                        finish(IllegalStateException("NDT7 " + (if (isUpload) "upload" else "download") + " WebSocket failed: " + detail, t))
-                    }
-                }
-                socketRef.set(client.newWebSocket(request, listener))
-                continuation.invokeOnCancellation { socketRef.get()?.cancel() }
-            }
-        }
 }
 private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String)
 private object UpdateChecker {
