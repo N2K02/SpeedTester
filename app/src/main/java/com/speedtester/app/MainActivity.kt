@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
 private fun SpeedTesterApp(context: Context) {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("speedtester", Context.MODE_PRIVATE) }
-    var endpoint by remember { mutableStateOf((prefs.getString("endpoint", "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0") ?: "").takeUnless { it.contains("speed.cloudflare.com", ignoreCase = true) } ?: "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0") }
+    val endpoint = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name=SpeedTester&client_version=1.0"
     var availableServers by remember { mutableStateOf<List<NdtServerCandidate>>(emptyList()) }
     var selectedServer by remember { mutableStateOf<NdtServerCandidate?>(null) }
     var serversLoading by remember { mutableStateOf(false) }
@@ -95,7 +95,7 @@ private fun SpeedTesterApp(context: Context) {
         serversError = ""
         try {
             availableServers = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
-            if (availableServers.isEmpty()) serversError = "No compatible M-Lab servers were found. Refresh to try again."
+            if (availableServers.isEmpty()) serversError = "M-Lab did not report any test servers located in Mauritius. This does not mean My.t or Emtel has no Ookla server; those require a different test engine."
         } catch (e: Exception) {
             serversError = e.message ?: "Unable to discover compatible servers"
         } finally { serversLoading = false }
@@ -191,8 +191,7 @@ private fun SpeedTesterApp(context: Context) {
                     NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
                     NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
                     NavigationBarItem(selected = activeTab == 2, onClick = { activeTab = 2 }, icon = { Icon(Icons.Default.Bolt, null) }, label = { Text("Server") })
-                    NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
-                    NavigationBarItem(selected = activeTab == 4, onClick = { activeTab = 4 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
+                    NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
                 }
             }, containerColor = Color(0xFF0B1117)
         ) { padding ->
@@ -212,7 +211,7 @@ private fun SpeedTesterApp(context: Context) {
                                             try {
                                                 val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
                                                 availableServers = refreshed
-                                                if (refreshed.isEmpty()) serversError = "No compatible M-Lab servers were found."
+                                                if (refreshed.isEmpty()) serversError = "No Mauritius-located M-Lab NDT7 servers were returned. Provider/Ookla servers need a separate compatible test engine."
                                                 if (selectedServer != null && refreshed.none { it.host == selectedServer?.host }) selectedServer = null
                                             } catch (e: Exception) { serversError = e.message ?: "Server refresh failed" }
                                             finally { serversLoading = false }
@@ -224,7 +223,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Text("${filteredServers.size} Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding compatible servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
                                 if (serversError.isNotBlank()) Text(serversError, color = Color(0xFFFFA64D), style = MaterialTheme.typography.bodySmall)
-                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible M-Lab test servers were found in Mauritius. Refresh later to check again; overseas servers are intentionally excluded.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible M-Lab NDT7 servers were found in Mauritius. Overseas servers are excluded. Provider/Ookla servers cannot be tested by the current NDT7 engine.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 visibleServers.forEach { candidate ->
                                     val isSelected = selectedServer?.host == candidate.host
                                     Card(
@@ -575,24 +574,7 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                3 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                    item { Text("M-Lab NDT7 server discovery URL", color = Muted) }
-                    item { OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Server URL") }) }
-                    item {
-                        Button(onClick = {
-                            val valid = runCatching { URL(endpoint).protocol in listOf("https", "http") }.getOrDefault(false)
-                            if (valid) { prefs.edit().putString("endpoint", endpoint.trim().trimEnd('/')).apply(); updateMessage = "Server saved" } else updateMessage = "Enter a valid HTTP(S) URL"
-                        }) { Text("Save server") }
-                    }
-                    item { Text("Default: M-Lab NDT7 automatic server discovery. SpeedTester selects an available test server automatically; do not enter a regular website URL. NDT7 test measurements are shared with M-Lab and may be published with your IP address.", color = Muted, style = MaterialTheme.typography.bodySmall) }
-                    item { Text("Data usage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                    item { Text("A full test transfers several megabytes. Tests run only on demand; no background speed testing.", color = Muted) }
-                    item { Text("Updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                    item { Text("Current version " + BuildConfig.VERSION_NAME + ". Open the Updates tab to check GitHub Releases.", color = Muted) }
-                    if (updateMessage.isNotBlank()) item { Text(updateMessage, color = Teal) }
-                }
-                else -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                3 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     item { Text("App updates", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
