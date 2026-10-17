@@ -782,6 +782,21 @@ private object ServerGeoLocator {
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
 /**
+ * Uses the exact HTTPS Z/X/Y URL required by OpenStreetMap's tile policy.
+ * Keep the URL isolated here so the source can be changed without touching map controls.
+ */
+private fun openStreetMapTileSource() = object : OnlineTileSourceBase(
+    "OpenStreetMap Standard", 0, 19, 256, ".png",
+    arrayOf("https://tile.openstreetmap.org/"),
+    "© OpenStreetMap contributors"
+) {
+    override fun getTileURLString(pMapTileIndex: Long): String =
+        getBaseUrl() + MapTileIndex.getZoom(pMapTileIndex) + "/" +
+            MapTileIndex.getX(pMapTileIndex) + "/" +
+            MapTileIndex.getY(pMapTileIndex) + ".png"
+}
+
+/**
  * Native OpenStreetMap view. Controls are Compose overlays; markers are only rebuilt
  * when the server data or distance origin changes, not on every map gesture/recomposition.
  */
@@ -812,10 +827,14 @@ private fun ServerMapView(
             factory = { viewContext ->
                 val preferences = viewContext.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
                 Configuration.getInstance().load(viewContext, preferences)
-                // OSM tile servers need a descriptive User-Agent rather than a generic package name.
-                Configuration.getInstance().userAgentValue = "com.speedtester.app"
+                // Identify the app properly to OpenStreetMap's public tile service.
+                // The service may block generic library/package-only User-Agent strings.
+                Configuration.getInstance().userAgentValue =
+                    "SpeedTester/4.7 (Android; https://github.com/N2K02/SpeedTester)"
+                // Keep downloader failures visible in logcat while diagnosing blank tiles.
+                Configuration.getInstance().debugMapTileDownloader = true
                 MapView(viewContext).apply {
-                    setTileSource(TileSourceFactory.MAPNIK)
+                    setTileSource(openStreetMapTileSource())
                     setMultiTouchControls(true)
                     setBuiltInZoomControls(false)
                     setUseDataConnection(true)
@@ -839,7 +858,7 @@ private fun ServerMapView(
                                 getBaseUrl() + MapTileIndex.getZoom(pMapTileIndex) + "/" +
                                     MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
                         }
-                        else -> TileSourceFactory.MAPNIK
+                        else -> openStreetMapTileSource()
                     }
                     map.setTileSource(source)
                     map.tag = Pair(tileStyle, previousTag?.second as? String ?: "")
