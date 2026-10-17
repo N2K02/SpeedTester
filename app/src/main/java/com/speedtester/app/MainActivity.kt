@@ -89,9 +89,7 @@ private fun SpeedTesterApp(context: Context) {
     var serversLoading by remember { mutableStateOf(false) }
     var serversError by remember { mutableStateOf("") }
     var serverSearch by remember { mutableStateOf("") }
-    var countryFilter by remember { mutableStateOf("All countries") }
     var serverPage by remember { mutableIntStateOf(0) }
-    var countryMenuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         serversLoading = true
         serversError = ""
@@ -102,16 +100,16 @@ private fun SpeedTesterApp(context: Context) {
             serversError = e.message ?: "Unable to discover compatible servers"
         } finally { serversLoading = false }
     }
-    val filteredServers = remember(availableServers, serverSearch, countryFilter) {
+    val filteredServers = remember(availableServers, serverSearch) {
         availableServers.filter { candidate ->
-            (countryFilter == "All countries" || candidate.countryName.equals(countryFilter, true)) &&
-            (serverSearch.isBlank() || listOf(candidate.host, candidate.city, candidate.country, candidate.label).any { it.contains(serverSearch.trim(), true) })
-        }.sortedWith(compareBy<NdtServerCandidate> { if (it.country.equals("MU", true)) 0 else 1 }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.latencyMs ?: Long.MAX_VALUE })
+            candidate.country.equals("MU", true) &&
+            (serverSearch.isBlank() || listOf(candidate.host, candidate.city, candidate.countryName, candidate.label).any { it.contains(serverSearch.trim(), true) })
+        }.sortedWith(compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.host })
     }
     val serverPageSize = 3
     val serverPageCount = maxOf(1, (filteredServers.size + serverPageSize - 1) / serverPageSize)
     val visibleServers = filteredServers.drop(serverPage * serverPageSize).take(serverPageSize)
-    LaunchedEffect(filteredServers.size, serverSearch, countryFilter) { serverPage = 0 }
+    LaunchedEffect(filteredServers.size, serverSearch) { serverPage = 0 }
     var testing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready to test") }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -201,23 +199,12 @@ private fun SpeedTesterApp(context: Context) {
             when (activeTab) {
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF14232B)), shape = RoundedCornerShape(22.dp)) {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("MAURITIUS SPEED TEST", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                Text("Use KaliteNet, the ICTA-supported Mauritius internet-quality testing platform, for a local cross-check.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                Button(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://kalitenet.icta.mu"))) } }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Open KaliteNet · Mauritius")
-                                }
-                            }
-                        }
-                    }
-                    item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("MAURITIUS SERVER SELECTOR", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                        Text("Compatible test servers · local first", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        Text("MAURITIUS TEST SERVERS", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text("Mauritius-only · lowest measured latency first", color = Muted, style = MaterialTheme.typography.bodySmall)
                                     }
                                     TextButton(onClick = {
                                         scope.launch {
@@ -232,22 +219,12 @@ private fun SpeedTesterApp(context: Context) {
                                         }
                                     }, enabled = !serversLoading && !testing) { Text("Refresh") }
                                 }
-                                Text("Sorted with Mauritius first, then by estimated distance from the island and measured TCP latency. These are M-Lab NDT7-compatible servers, not a claim that they are hosted by My.t or Emtel.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Only compatible test servers reported in Mauritius are shown. Servers are ranked by measured latency, similar to a speed-test server picker. These are M-Lab NDT7 servers, not a claim that they are hosted by My.t or Emtel.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search server, city, host") }, placeholder = { Text("e.g. Mauritius, Nairobi") })
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Box {
-                                        OutlinedButton(onClick = { countryMenuExpanded = true }) { Text(countryFilter) }
-                                        DropdownMenu(expanded = countryMenuExpanded, onDismissRequest = { countryMenuExpanded = false }) {
-                                            (listOf("All countries") + availableServers.map { it.countryName }.filter { it.isNotBlank() }.distinct().sorted()).forEach { country ->
-                                                DropdownMenuItem(text = { Text(country) }, onClick = { countryFilter = country; countryMenuExpanded = false })
-                                            }
-                                        }
-                                    }
-                                    Text("${filteredServers.size} server(s) · max 10", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                }
+                                Text("${filteredServers.size} Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding compatible servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
                                 if (serversError.isNotBlank()) Text(serversError, color = Color(0xFFFFA64D), style = MaterialTheme.typography.bodySmall)
-                                if (!serversLoading && visibleServers.isEmpty()) Text("No servers match this search/filter. Try All countries or refresh.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible M-Lab test servers were found in Mauritius. Refresh later to check again; overseas servers are intentionally excluded.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 visibleServers.forEach { candidate ->
                                     val isSelected = selectedServer?.host == candidate.host
                                     Card(
@@ -928,7 +905,8 @@ private object SpeedEngine {
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(0, TimeUnit.MILLISECONDS).build()
 
     suspend fun discoverCandidates(): List<NdtServerCandidate> = withContext(Dispatchers.IO) {
-        val urls = listOf(LOCATE_URL + "&country=MU&strict=true", LOCATE_URL + "&country=MU", LOCATE_URL)
+        // Mauritius-only discovery: never fall back to global or overseas servers.
+        val urls = listOf(LOCATE_URL + "&country=MU&strict=true", LOCATE_URL + "&country=MU")
         val found = linkedMapOf<String, NdtServerCandidate>()
         for (url in urls) {
             try {
@@ -953,6 +931,8 @@ private object SpeedEngine {
                     val location = result.optJSONObject("location")
                     val city = location?.optString("city").orEmpty().takeUnless { it == "null" }.orEmpty()
                     val country = location?.optString("country").orEmpty().takeUnless { it == "null" }.orEmpty()
+                    // Enforce Mauritius locally even if the locate API ignores the country query.
+                    if (!country.equals("MU", true)) continue
                     val countryName = when (country.uppercase(java.util.Locale.ROOT)) { "MU" -> "Mauritius"; "MG" -> "Madagascar"; "ZA" -> "South Africa"; "KE" -> "Kenya"; "RE" -> "Réunion"; "SC" -> "Seychelles"; else -> country }
                     val lat = location?.optString("latitude")?.toDoubleOrNull()
                     val lon = location?.optString("longitude")?.toDoubleOrNull()
@@ -969,7 +949,9 @@ private object SpeedEngine {
             } catch (_: Exception) { /* Try the next discovery scope. */ }
             if (found.size >= 10) break
         }
-        found.values.sortedWith(compareBy<NdtServerCandidate> { if (it.country.equals("MU", true)) 0 else 1 }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.latencyMs ?: Long.MAX_VALUE }).take(10)
+        found.values.filter { it.country.equals("MU", true) }
+            .sortedWith(compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.host })
+            .take(10)
     }
 
     suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
