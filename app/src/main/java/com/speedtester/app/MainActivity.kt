@@ -1,6 +1,7 @@
 package com.speedtester.app
 
 import android.content.Context
+import android.provider.Settings
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -280,8 +281,24 @@ private object UpdateChecker {
             var apkUrl: String? = null
             for (i in 0 until assets.length()) { val asset = assets.getJSONObject(i); if (asset.optString("name").endsWith(".apk", true)) { apkUrl = asset.optString("browser_download_url"); break } }
             if (apkUrl.isNullOrBlank()) return "Version " + tag + " is available, but no APK is attached yet."
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            "Version " + tag + " is available. Opening APK download."
+            if (!context.packageManager.canRequestPackageInstalls()) {
+                val settings = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(settings)
+                return "Version " + tag + " is available. Allow installs from SpeedTester, then check for updates again."
+            }
+            val apkResponse = client.newCall(Request.Builder().url(apkUrl).header("User-Agent", "SpeedTester-Android").build()).execute()
+            val apkFile = File(context.cacheDir, "updates/SpeedTester-update.apk")
+            apkFile.parentFile?.mkdirs()
+            apkResponse.use { response ->
+                check(response.isSuccessful) { "APK download failed: HTTP " + response.code }
+                val body = response.body ?: error("GitHub returned an empty APK")
+                body.byteStream().use { input -> apkFile.outputStream().use { output -> input.copyTo(output) } }
+            }
+            val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
+            val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(install)
+            "Downloaded SpeedTester " + tag + ". Android's installer is ready."
         } catch (e: Exception) { "Update check failed: " + (e.message ?: "network error") }
     }
     private fun compareVersions(a: String, b: String): Int {
