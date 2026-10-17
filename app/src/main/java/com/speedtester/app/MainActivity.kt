@@ -1291,13 +1291,17 @@ private object SpeedEngine {
         SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, null, null, resolvedAddress, dnsLookupMs)
     }
 }
-private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String)
+private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String, val diagnostics: String = "")
 private object UpdateChecker {
     private const val API = "https://api.github.com/repos/N2K02/SpeedTester/releases/latest"
     fun getRelease(context: Context): ReleaseInfo = try {
         val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
         val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "SpeedTester-Android").build()
-        val json = client.newCall(request).execute().use { r -> check(r.isSuccessful) { "GitHub returned HTTP " + r.code }; JSONObject(r.body?.string() ?: "{}") }
+        val json = client.newCall(request).execute().use { r ->
+            val body = r.body?.string().orEmpty()
+            if (!r.isSuccessful) error("GitHub Releases API returned HTTP " + r.code + " at " + r.request.url + "\nResponse body: " + body.take(2000))
+            JSONObject(body.ifBlank { "{}" })
+        }
         val tag = json.optString("tag_name").removePrefix("v")
         val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
         val notes = json.optString("body").ifBlank { "No release notes were provided." }
@@ -1310,8 +1314,13 @@ private object UpdateChecker {
             apkUrl.isBlank() -> "A newer release exists, but no APK is attached yet."
             else -> "A new version is available."
         }
-        ReleaseInfo(tag, notes, apkUrl, available, message)
-    } catch (e: Exception) { ReleaseInfo("", "", "", false, "Update check failed: " + (e.message ?: "network error")) }
+        val currentVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+        val report = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: Release check\nInstalled version: " + currentVersion + "\nLatest version: " + tag + "\nRelease API URL: " + API + "\nAPK URL: " + (apkUrl.ifBlank { "not available" })
+        ReleaseInfo(tag, notes, apkUrl, available, message, report)
+    } catch (e: Exception) {
+        val report = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: Release check\nRelease API URL: " + API + "\nException: " + e.javaClass.name + "\nMessage: " + (e.message ?: "No exception message")
+        ReleaseInfo("", "", "", false, "Update check failed. Tap Show details for diagnostics.", report)
+    }
     fun downloadAndInstall(context: Context, apkUrl: String, onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit): String {
         return try {
         if (!context.packageManager.canRequestPackageInstalls()) {
@@ -1323,7 +1332,10 @@ private object UpdateChecker {
         val apkFile = File(context.cacheDir, "updates/SpeedTester-update.apk")
         apkFile.parentFile?.mkdirs()
         response.use { r ->
-            if (!r.isSuccessful) error("APK download failed: HTTP ${r.code}")
+            if (!r.isSuccessful) {
+                val errorBody = r.body?.string().orEmpty()
+                error("APK download failed: HTTP " + r.code + " at " + r.request.url + "\nResponse body: " + errorBody.take(2000))
+            }
             val body = r.body ?: error("GitHub returned an empty APK")
             val totalBytes = body.contentLength()
             var downloadedBytes = 0L
