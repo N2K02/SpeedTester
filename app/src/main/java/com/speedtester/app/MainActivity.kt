@@ -8,10 +8,16 @@ import android.location.Location
 import android.location.LocationManager
 import android.content.ClipboardManager
 import android.provider.Settings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.maplibre.android.MapLibre
+import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapView
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -774,96 +780,89 @@ private object ServerGeoLocator {
     InfoRow("Receiver-window limited", info.receiverLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
-// Neutral pseudo-origin: tile requests must not pretend to originate from the OSM website.
-private const val MAP_BASE_URL = "https://appassets.androidplatform.net/"
+private const val MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
-private fun buildServerMapHtml(context: Context, servers: List<NdtServerCandidate>, originLat: Double, originLon: Double): String {
-    fun asset(name: String): String = runCatching {
-        context.assets.open("leaflet/$name").bufferedReader().use { it.readText() }
-    }.getOrDefault("")
-    val css = asset("leaflet.css")
-    val js = asset("leaflet.js")
-    val markers = JSONArray()
-    servers.forEach { server ->
-        val lat = server.latitude ?: return@forEach
-        val lon = server.longitude ?: return@forEach
-        markers.put(JSONObject().put("lat", lat).put("lon", lon)
-            .put("label", server.label).put("city", server.city)
-            .put("host", server.host).put("distance", server.distanceKm ?: JSONObject.NULL)
-            .put("ping", server.latencyMs ?: JSONObject.NULL))
+/**
+ * Native MapLibre map embedded in Compose. This removes the WebView/Leaflet/OSM-raster-tile
+ * dependency that was leaving the map blank on some devices.
+ */
+@Composable
+private fun ServerMapLibreView(
+    servers: List<NdtServerCandidate>,
+    originLat: Double,
+    originLon: Double,
+    modifier: Modifier = Modifier
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var mapView by remember { mutableStateOf<MapView?>(null) }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { viewContext ->
+            MapLibre.getInstance(viewContext)
+            MapView(viewContext).apply {
+                onCreate(null)
+                mapView = this
+                getMapAsync { map ->
+                    map.setStyle(MAP_STYLE_URL) {
+                        val origin = LatLng(originLat, originLon)
+                        val bounds = LatLngBounds.Builder().include(origin)
+                        addMarker(
+                            MarkerOptions()
+                                .position(origin)
+                                .title("Distance reference")
+                                .snippet("Used to calculate approximate server distances")
+                        )
+                        var serverMarkerCount = 0
+                        servers.forEach { server ->
+                            val lat = server.latitude
+                            val lon = server.longitude
+                            if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                                val point = LatLng(lat, lon)
+                                val distance = server.distanceKm?.let {
+                                    String.format(java.util.Locale.US, "%.1f km away", it)
+                                } ?: "Distance unavailable"
+                                val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
+                                addMarker(
+                                    MarkerOptions()
+                                        .position(point)
+                                        .title(server.label)
+                                        .snippet("${server.city}\n$distance · $ping\n${server.host}")
+                                )
+                                bounds.include(point)
+                                serverMarkerCount++
+                            }
+                        }
+                        if (serverMarkerCount > 0) {
+                            moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
+                        } else {
+                            moveCamera(CameraUpdateFactory.newLatLngZoom(origin, 7.0))
+                        }
+                    }
+                }
+            }
+        },
+        update = { }
+    )
+
+    DisposableEffect(lifecycleOwner, mapView) {
+        val currentMapView = mapView
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> currentMapView?.onStart()
+                Lifecycle.Event.ON_RESUME -> currentMapView?.onResume()
+                Lifecycle.Event.ON_PAUSE -> currentMapView?.onPause()
+                Lifecycle.Event.ON_STOP -> currentMapView?.onStop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            currentMapView?.onDestroy()
+            if (mapView === currentMapView) mapView = null
+        }
     }
-    val markerJson = markers.toString()
-    val script = """
-        (function () {
-          var msg = document.getElementById('msg');
-          function fail(text) { msg.textContent = text; msg.style.display = 'block'; }
-          if (typeof L === 'undefined') { fail('The bundled map library could not be loaded.'); return; }
-          var points = $markerJson;
-          var map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([$originLat, $originLon], 8);
-          var loaded = 0, errors = 0, bounds = [];
-          var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            minZoom: 2, maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            referrerPolicy: 'strict-origin-when-cross-origin'
-          });
-          tiles.on('tileload', function () { loaded++; msg.style.display = 'none'; });
-          tiles.on('tileerror', function () {
-            errors++;
-            if (loaded === 0 && errors >= 3) fail('Map tiles could not load. Server list and distances are still available below.');
-          });
-          tiles.addTo(map);
-          points.forEach(function (p, i) {
-            var marker = L.circleMarker([p.lat, p.lon], {
-              radius: 7, color: '#EAF2F5', weight: 1.5,
-              fillColor: '#13B8A6', fillOpacity: 0.95
-            }).addTo(map);
-            var distance = p.distance === null ? 'Distance unavailable' : Number(p.distance).toFixed(1) + ' km away';
-            var ping = p.ping === null ? 'TCP ping unavailable' : p.ping + ' ms TCP ping';
-            marker.bindPopup('<b>' + (i + 1) + '. ' + escapeHtml(p.label) + '</b><br>' + escapeHtml(p.city) + '<br>' + distance + '<br>' + ping + '<br><small>' + escapeHtml(p.host) + '</small>');
-            bounds.push([p.lat, p.lon]);
-          });
-          L.circleMarker([$originLat, $originLon], {radius:5,color:'#FFFFFF',weight:2,fillColor:'#4A90E2',fillOpacity:1})
-            .addTo(map).bindPopup('Distance reference location');
-          bounds.push([$originLat, $originLon]);
-          function escapeHtml(s) { return String(s || '').replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-          if (bounds.length > 1) map.fitBounds(bounds, {padding:[18,18], maxZoom:10});
-          setTimeout(function () { map.invalidateSize(true); }, 300);
-          window.addEventListener('resize', function () { map.invalidateSize(true); });
-          setTimeout(function () { if (loaded === 0) fail('No map tiles received. The server list and distances remain available below.'); }, 10000);
-        })();
-    """.trimIndent()
-    return "<!doctype html><html><head><meta charset=\"utf-8\">" +
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">" +
-        "<style>" + css + "</style>" +
-        "<style>html,body{margin:0;height:100%;background:#0d151b}#map{width:100%;height:100%;background:#0d151b}" +
-        "#msg{display:block;position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);z-index:1000;text-align:center;color:#9fb0ba;font:14px sans-serif;pointer-events:none}</style>" +
-        "</head><body><div id=\"map\"></div><div id=\"msg\">Loading Mauritius server map…</div><script>" + js + "</script><script>" + script + "</script></body></html>"
-}
-
-@Composable private fun ServerMapWebView(servers: List<NdtServerCandidate>, originLat: Double, originLon: Double, modifier: Modifier = Modifier) {
-    val appContext = LocalContext.current
-    val html = remember(servers, originLat, originLon) { buildServerMapHtml(appContext, servers, originLat, originLon) }
-    AndroidView(modifier = modifier, factory = { context ->
-        WebView(context).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#0D151B"))
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = false
-            settings.loadsImagesAutomatically = true
-            settings.blockNetworkImage = false
-            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0 (com.speedtester.app)"
-            isVerticalScrollBarEnabled = false
-            isHorizontalScrollBarEnabled = false
-            webViewClient = WebViewClient()
-            tag = html
-            loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
-        }
-    }, update = { view ->
-        if (view.tag != html) {
-            view.tag = html
-            view.loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
-        }
-    })
 }
 private data class NdtTcpInfo(
     val minRttUs: Long? = null, val rttUs: Long? = null, val rttVarUs: Long? = null,
