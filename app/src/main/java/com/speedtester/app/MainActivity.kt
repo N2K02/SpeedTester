@@ -129,6 +129,7 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.fillMaxWidth().height(170.dp))
+                                Text("Scale: 0–${max(10f, (downloadSamples + uploadSamples).maxOrNull() ?: 10f).toInt()} Mbps · live rolling samples", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("━ Download", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall); Text("━ Upload", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall); Text("Live · Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
                                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                      StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
