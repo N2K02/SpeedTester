@@ -574,8 +574,8 @@ private fun SpeedTesterApp(context: Context) {
                             Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
                                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text("Mauritius test servers", fontWeight = FontWeight.Bold)
-                                    Text("${filteredServers.count { it.latitude != null && it.longitude != null }} of ${filteredServers.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                    val mapped = filteredServers.filter { it.latitude != null && it.longitude != null }
+                                    Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    val mapped = serversWithDistance.filter { it.latitude != null && it.longitude != null }
                                     if (mapped.isNotEmpty()) {
                                         ServerMapWebView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(320.dp))
                                         Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = Muted, style = MaterialTheme.typography.labelSmall)
@@ -591,7 +591,7 @@ private fun SpeedTesterApp(context: Context) {
                             Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
                                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("Servers · nearest first", fontWeight = FontWeight.Bold)
-                                    filteredServers.forEachIndexed { index, server ->
+                                    serversWithDistance.forEachIndexed { index, server ->
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Text("${index + 1}.", color = Teal, fontWeight = FontWeight.Bold)
                                             Column(Modifier.weight(1f)) {
@@ -600,7 +600,7 @@ private fun SpeedTesterApp(context: Context) {
                                             }
                                             Text(server.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "— km", color = Teal, style = MaterialTheme.typography.labelMedium)
                                         }
-                                        if (index < filteredServers.lastIndex) HorizontalDivider(color = Color(0xFF26343E))
+                                        if (index < serversWithDistance.lastIndex) HorizontalDivider(color = Color(0xFF26343E))
                                     }
                                 }
                             }
