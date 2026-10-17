@@ -41,9 +41,9 @@ jobs:
         env:
           REQUESTED: ${{ github.event.inputs.version }}
         run: |
-          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\\.[0-9]$' | sort -V | tail -1 || true)
+          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]$' | sort -V | tail -1 || true)
           if [ -n "$REQUESTED" ]; then
-            echo "$REQUESTED" | grep -Eq '^[0-9]+\\.[0-9]$' || { echo "::error::Version must look like 1.0"; exit 1; }
+            echo "$REQUESTED" | grep -Eq '^[0-9]+\.[0-9]$' || { echo "::error::Version must look like 1.0"; exit 1; }
             ver="$REQUESTED"
           elif [ -z "$last" ]; then
             ver="1.0"
@@ -66,7 +66,7 @@ jobs:
             echo "### Install"
             echo "Download the APK below and install it on your phone."
             echo
-            echo "_Built from \`${GITHUB_SHA::7}\`${prev:+ · changes since \`$prev\`}_"
+            echo "_Built from ${GITHUB_SHA::7} ${prev:+· changes since $prev}_"
           } > release-notes.md
           cat release-notes.md
 
@@ -84,7 +84,6 @@ jobs:
             echo "::error title=Missing signing secret::Add the SIGNING_PASSPHRASE repository secret."
             exit 1
           fi
-          mkdir -p signing-temp
           K="$RUNNER_TEMP/keys"; mkdir -p "$K"; chmod 700 "$K"
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing/keys.tar.enc -pass env:SIGNING_PASSPHRASE | tar -xf - -C "$K"
           BT=$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/* | sort -V | tail -1)
@@ -99,7 +98,6 @@ jobs:
             --out "$APP-$VERSION.apk" app/build/outputs/apk/release/app-release-unsigned.apk
           rm -rf "$K"
           "$BT/apksigner" verify --verbose --print-certs "$APP-$VERSION.apk" | grep -E "Signer.*(DN|SHA-256 digest)"
-          rm -rf signing-temp
 
       - name: Upload APK (workflow artifact)
         uses: actions/upload-artifact@v4

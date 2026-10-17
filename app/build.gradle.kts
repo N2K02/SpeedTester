@@ -5,7 +5,7 @@ plugins {
 }
 
 val appVersion = (findProperty("appVersion") as String?) ?: "1.0"
-require(Regex("\\\\d+\\\\.\\\\d").matches(appVersion)) { "appVersion must look like 1.0" }
+require(Regex("\\d+\\.\\d").matches(appVersion)) { "appVersion must look like 1.0" }
 val appVersionCode = appVersion.split(".").let { it[0].toInt() * 10 + it[1].toInt() }
 
 android {
