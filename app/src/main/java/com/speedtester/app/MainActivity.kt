@@ -168,6 +168,8 @@ private fun SpeedTesterApp(context: Context) {
     var activeTab by remember { mutableIntStateOf(0) }
     var updateMessage by remember { mutableStateOf("Tap Check for updates to see the latest release.") }
     var updateDetails by remember { mutableStateOf("") }
+    var updateDiagnostics by remember { mutableStateOf("") }
+    var updateDiagnosticsVisible by remember { mutableStateOf(false) }
     var updateVersion by remember { mutableStateOf("") }
     var updateUrl by remember { mutableStateOf("") }
     var updateAvailable by remember { mutableStateOf(false) }
@@ -623,6 +625,16 @@ private fun SpeedTesterApp(context: Context) {
                                 if (updateVersion.isNotBlank()) Text("Latest version: " + updateVersion, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(updateMessage, color = Muted)
                                 if (updateDetails.isNotBlank()) { HorizontalDivider(color = Color(0xFF26343E)); Text("What's new", fontWeight = FontWeight.SemiBold); Text(updateDetails, color = Muted, style = MaterialTheme.typography.bodyMedium) }
+                                if (updateDiagnostics.isNotBlank()) {
+                                    TextButton(onClick = { updateDiagnosticsVisible = !updateDiagnosticsVisible }) { Text(if (updateDiagnosticsVisible) "Hide details" else "Show details") }
+                                    if (updateDiagnosticsVisible) {
+                                        Text(updateDiagnostics, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        Button(onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            clipboard?.setPrimaryClip(ClipData.newPlainText("Update diagnostics", updateDiagnostics))
+                                        }, modifier = Modifier.fillMaxWidth()) { Text("Copy diagnostics") }
+                                    }
+                                }
                                 if (updateDownloading) {
                                     LinearProgressIndicator(progress = { updateProgress }, modifier = Modifier.fillMaxWidth())
                                     val downloadedText = String.format(java.util.Locale.US, "%.2f MB", updateDownloadedBytes / 1048576.0)
@@ -631,12 +643,15 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 Button(onClick = {
                                     scope.launch {
+                                        updateDiagnostics = ""
+                                        updateDiagnosticsVisible = false
                                         updateMessage = "Checking GitHub Releases…"
                                         val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
                                         updateVersion = result.version
                                         updateDetails = result.notes
                                         updateUrl = result.apkUrl
                                         updateAvailable = result.available
+                                        updateDiagnostics = result.diagnostics
                                         updateMessage = result.message
                                     }
                                 }, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
@@ -646,6 +661,8 @@ private fun SpeedTesterApp(context: Context) {
                                         updateProgress = 0f
                                         updateDownloadedBytes = 0L
                                         updateTotalBytes = -1L
+                                        updateDiagnostics = ""
+                                        updateDiagnosticsVisible = false
                                         updateMessage = "Preparing update download…"
                                         val result = withContext(Dispatchers.IO) {
                                             UpdateChecker.downloadAndInstall(context, updateUrl) { downloaded, total ->
@@ -657,7 +674,9 @@ private fun SpeedTesterApp(context: Context) {
                                                 }
                                             }
                                         }
-                                        updateMessage = result
+                                        updateMessage = result.message
+                                        updateDiagnostics = result.diagnostics
+                                        updateDiagnosticsVisible = false
                                         updateDownloading = false
                                     }
                                 }, enabled = !updateDownloading, modifier = Modifier.fillMaxWidth()) { Text(if (updateDownloading) "Downloading…" else "Download and install") }
