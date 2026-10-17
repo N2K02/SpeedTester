@@ -167,7 +167,6 @@ private fun SpeedTesterApp(context: Context) {
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
     var updateMessage by remember { mutableStateOf("Tap Check for updates to see the latest release.") }
-    var updateDetails by remember { mutableStateOf("") }
     var updateDiagnostics by remember { mutableStateOf("") }
     var updateDiagnosticsVisible by remember { mutableStateOf(false) }
     var updateVersion by remember { mutableStateOf("") }
@@ -638,13 +637,6 @@ private fun SpeedTesterApp(context: Context) {
                             Text(updateMessage, color = Muted, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
-                    if (updateDetails.isNotBlank()) {
-                        item {
-                            UpdateSectionCard("What's new", "Release notes for the latest version") {
-                                Text(updateDetails, color = Muted, style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
                     if (updateDownloading) {
                         item {
                             UpdateSectionCard("Download progress", "APK download progress") {
@@ -664,7 +656,6 @@ private fun SpeedTesterApp(context: Context) {
                                     updateMessage = "Checking GitHub Releases…"
                                     val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
                                     updateVersion = result.version
-                                    updateDetails = result.notes
                                     updateUrl = result.apkUrl
                                     updateAvailable = result.available
                                     updateDiagnostics = result.diagnostics
