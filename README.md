@@ -3,10 +3,12 @@
 A lightweight Android network diagnostics toolkit (minSdk 29) built with Kotlin and Jetpack Compose.
 
 ## Features
-- Download/upload throughput tests with a live rolling bandwidth chart
-- Ping-style TCP latency, jitter and DNS lookup diagnostics
+- Download/upload throughput tests with separate live download and upload chart series
+- Average and peak throughput estimates during each test
+- TCP latency and jitter before transfer, plus loaded-latency and connection-failure probes afterward
 - Wi-Fi/network status (RSSI, frequency, link speed where Android exposes them)
-- Local history, CSV export, configurable custom LibreSpeed-compatible endpoint
+- Local history with shareable individual results, expanded CSV export, and configurable custom LibreSpeed-compatible endpoint
+- Live connection diagnostics, server host/protocol details, and Wi-Fi signal quality information
 - GitHub Releases update check and APK download/install handoff
 - Manual tests only; no continuous background polling
 
