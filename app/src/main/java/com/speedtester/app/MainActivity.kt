@@ -583,7 +583,7 @@ private fun SpeedTesterApp(context: Context) {
                                     Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                     val mapped = serversWithDistance.filter { it.latitude != null && it.longitude != null }
                                     if (mapped.isNotEmpty()) {
-                                        ServerMapWebView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(320.dp))
+                                        ServerMapLibreView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(320.dp))
                                         Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = Muted, style = MaterialTheme.typography.labelSmall)
                                     } else {
                                         Box(Modifier.fillMaxWidth().height(180.dp).background(Color(0xFF0D151B), RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
@@ -807,7 +807,7 @@ private fun ServerMapLibreView(
                     map.setStyle(MAP_STYLE_URL) {
                         val origin = LatLng(originLat, originLon)
                         val bounds = LatLngBounds.Builder().include(origin)
-                        addMarker(
+                        map.addMarker(
                             MarkerOptions()
                                 .position(origin)
                                 .title("Distance reference")
@@ -823,7 +823,7 @@ private fun ServerMapLibreView(
                                     String.format(java.util.Locale.US, "%.1f km away", it)
                                 } ?: "Distance unavailable"
                                 val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
-                                addMarker(
+                                map.addMarker(
                                     MarkerOptions()
                                         .position(point)
                                         .title(server.label)
@@ -834,9 +834,9 @@ private fun ServerMapLibreView(
                             }
                         }
                         if (serverMarkerCount > 0) {
-                            moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
+                            map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
                         } else {
-                            moveCamera(CameraUpdateFactory.newLatLngZoom(origin, 7.0))
+                            map.moveCamera(CameraUpdateFactory.newLatLngZoom(origin, 7.0))
                         }
                     }
                 }
