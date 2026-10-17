@@ -1319,9 +1319,7 @@ private object UpdateChecker {
             apkUrl.isBlank() -> "A newer release exists, but no APK is attached yet."
             else -> "A new version is available."
         }
-        val currentVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
-        val report = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: Release check\nInstalled version: " + currentVersion + "\nLatest version: " + tag + "\nRelease API URL: " + API + "\nAPK URL: " + (apkUrl.ifBlank { "not available" })
-        ReleaseInfo(tag, notes, apkUrl, available, message, report)
+        ReleaseInfo(tag, notes, apkUrl, available, message)
     } catch (e: Exception) {
         val report = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: Release check\nRelease API URL: " + API + "\nException: " + e.javaClass.name + "\nMessage: " + (e.message ?: "No exception message")
         ReleaseInfo("", "", "", false, "Update check failed. Tap Show details for diagnostics.", report)
