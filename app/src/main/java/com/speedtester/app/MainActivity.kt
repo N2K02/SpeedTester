@@ -1063,7 +1063,7 @@ private object SpeedEngine {
                     }.getOrNull()
                     found[key] = NdtServerCandidate(
                         hostPort, city, country, "Mauritius", secureUrl, secureUrl,
-                        lat, lon, distanceKmFromMauritius(lat, lon), latency, id, sponsor
+                        lat, lon, distanceKmBetween(-20.2, 57.5, lat, lon), latency, id, sponsor
                     )
                 }
             } catch (_: Exception) {
