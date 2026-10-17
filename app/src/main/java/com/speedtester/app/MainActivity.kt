@@ -201,6 +201,24 @@ private fun SpeedTesterApp(context: Context) {
             when (activeTab) {
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF14232B)), shape = RoundedCornerShape(22.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("MAURITIUS PROVIDER TESTS", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                Text("Use these separately for a local cross-check. Their results are not imported into SpeedTester history, and their measurements may use different methods or servers.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Button(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://kalitenet.icta.mu"))) } }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Open KaliteNet · ICTA / nPerf")
+                                }
+                                OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://speedtest.telecom.mu"))) } }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Open My.t / Mauritius Telecom speed test")
+                                }
+                                Text("Emtel: no official public speed-test endpoint was verified during this review. We will not label an unverified server as an Emtel server.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.nperf.com/en/product/nperf-engine-sdk"))) } }) {
+                                    Text("nPerf SDK integration information")
+                                }
+                            }
+                        }
+                    }
+                    item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
