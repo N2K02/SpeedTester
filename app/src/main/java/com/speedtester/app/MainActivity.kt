@@ -14,7 +14,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import android.content.Intent
@@ -827,7 +829,15 @@ private fun ServerMapView(
                 if (previousTag?.first != tileStyle) {
                     val source = when (tileStyle) {
                         "Topographic" -> TileSourceFactory.USGS_TOPO
-                        "Satellite" -> TileSourceFactory.USGS_SAT
+                        "Satellite" -> object : OnlineTileSourceBase(
+                            "Esri World Imagery", 0, 19, 256, "",
+                            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
+                            "Tiles © Esri"
+                        ) {
+                            override fun getTileURLString(pMapTileIndex: Long): String =
+                                getBaseUrl() + MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                                    MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
+                        }
                         else -> TileSourceFactory.MAPNIK
                     }
                     map.setTileSource(source)
