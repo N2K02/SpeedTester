@@ -308,7 +308,7 @@ private object SpeedEngine {
         onUpdate("Downloading", .08f, 0f)
         kotlinx.coroutines.delay(350)
         val cloudflare = URL(base).host.equals("speed.cloudflare.com", ignoreCase = true)
-        val downloadUrl = if (cloudflare) base + "/__down?bytes=8000000&nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&ckSize=8&nocache=" + System.nanoTime()
+        val downloadUrl = if (cloudflare) base + "/__down?bytes=16000000&nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&ckSize=8&nocache=" + System.nanoTime()
         val request = Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").build()
         val started = System.nanoTime(); var bytes = 0L; var lastReportNanos = started; var lastReportBytes = 0L
         client.newCall(request).execute().use { response ->
@@ -316,7 +316,7 @@ private object SpeedEngine {
             val stream = response.body?.byteStream() ?: error("Empty download response"); val buffer = ByteArray(32 * 1024)
             while (true) {
                 val n = stream.read(buffer); if (n < 0) break; bytes += n
-                val fraction = (bytes.toDouble() / 8_000_000.0).coerceIn(0.0, 1.0)
+                val fraction = (bytes.toDouble() / 16_000_000.0).coerceIn(0.0, 1.0)
                 val elapsed = (System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0
                 val now = System.nanoTime()
                 if (now - lastReportNanos >= 200_000_000L || bytes >= 8_000_000L) {
@@ -329,7 +329,7 @@ private object SpeedEngine {
         }
         val downloadMbps = bytes * 8.0 / ((System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
         onUpdate("Uploading", .55f, 0f)
-        val payload = ByteArray(2_000_000); java.security.SecureRandom().nextBytes(payload)
+        val payload = ByteArray(4_000_000); java.security.SecureRandom().nextBytes(payload)
         val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/empty.php?cors=true&nocache=" + System.nanoTime()
         kotlinx.coroutines.delay(350)
         val uploadStart = System.nanoTime()
