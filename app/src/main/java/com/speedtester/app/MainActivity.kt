@@ -49,6 +49,7 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -992,7 +993,7 @@ private object SpeedEngine {
         var downLastBytes = 0L
         var downPeak = 0.0
         val downCall = client.newCall(Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
-        val downResponse = withTimeout(12_000L) { withContext(Dispatchers.IO) { downCall.execute() } }
+        val downResponse = kotlinx.coroutines.withTimeout(12_000L) { withContext(Dispatchers.IO) { downCall.execute() } }
         downResponse.use { response ->
             if (!response.isSuccessful) error("Ookla download endpoint returned HTTP " + response.code + ". This server may not support the compatible transfer endpoint.")
             val body = response.body ?: error("Ookla download endpoint returned an empty response")
