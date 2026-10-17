@@ -158,9 +158,6 @@ private fun SpeedTesterApp(context: Context) {
     var uploadTcp by remember { mutableStateOf<NdtTcpInfo?>(null) }
     var serverIp by remember { mutableStateOf("") }
     var dnsLookupMs by remember { mutableLongStateOf(-1L) }
-    var regionalBenchmark by remember { mutableStateOf<RegionalBenchmark?>(null) }
-    var regionalLoading by remember { mutableStateOf(false) }
-    var regionalMessage by remember { mutableStateOf("Load public M-Lab measurements for Mauritius to compare your results.") }
     var loggedPhase by remember { mutableStateOf("") }
     var livePing by remember { mutableLongStateOf(-1L) }
     var liveJitter by remember { mutableDoubleStateOf(0.0) }
@@ -348,8 +345,8 @@ private fun SpeedTesterApp(context: Context) {
                                 InfoRow("Test server", serverDetails.host.ifBlank { "Not selected yet" })
                                 InfoRow("Server location", serverDetails.location.ifBlank { "Not available yet" })
                                 InfoRow("Selected-server ping", if (ping >= 0) "$ping ms" else "Measured during test")
-                                Text("M-Lab selects an available nearby server; nearest does not always mean fastest.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                InfoRow("Protocol", "M-Lab NDT7 · secure WebSocket")
+                                Text("Select a Mauritius Ookla-compatible endpoint. Latency is measured from this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                InfoRow("Protocol", "Ookla-compatible HTTPS transfer")
                                  InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
                                 InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Signal quality", netInfo.quality); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency / band", netInfo.frequency); InfoRow("Connection note", netInfo.note)
                             }
@@ -484,7 +481,7 @@ private fun SpeedTesterApp(context: Context) {
                                     Icon(Icons.Default.Bolt, null, tint = Teal, modifier = Modifier.size(26.dp))
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text("Connected M-Lab server", fontWeight = FontWeight.Bold)
+                                        Text("Connected Mauritius test server", fontWeight = FontWeight.Bold)
                                         Text(serverDetails.location.ifBlank { "Run a speed test to discover a server" }, color = Muted, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
@@ -499,7 +496,7 @@ private fun SpeedTesterApp(context: Context) {
                                 HorizontalDivider(color = Color(0xFF26343E))
                                 InfoRow("Server hostname", serverDetails.host.ifBlank { "—" })
                                 InfoRow("City / country", serverDetails.location.ifBlank { "—" })
-                                InfoRow("Test protocol", "M-Lab NDT7 over WSS")
+                                InfoRow("Test protocol", "Ookla-compatible HTTPS transfer")
                                 InfoRow("Download", "%.1f Mbps".format(java.util.Locale.US, download))
                                 InfoRow("Upload", "%.1f Mbps".format(java.util.Locale.US, upload))
                                 InfoRow("Idle TCP latency", if (ping >= 0) "$ping ms" else "—")
@@ -525,7 +522,7 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 HorizontalDivider(color = Color(0xFF26343E))
                                 Text("ADVANCED TCP DIAGNOSTICS", color = Muted, style = MaterialTheme.typography.labelLarge)
-                                Text("Server-reported TCP_INFO values are available only when the selected M-Lab server sends them.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("TCP_INFO is not provided by this HTTPS transfer engine; latency and stability are measured directly from this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 Text("Download direction", fontWeight = FontWeight.SemiBold)
                                 TcpInfoRows(downloadTcp)
                                 Text("Upload direction", fontWeight = FontWeight.SemiBold)
@@ -545,32 +542,8 @@ private fun SpeedTesterApp(context: Context) {
                                     InfoRow("Previous tests used", previous.size.toString())
                                 } else Text("Run more tests to build a personal baseline.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 HorizontalDivider(color = Color(0xFF26343E))
-                                Text("M-LAB REGIONAL RESEARCH", color = Muted, style = MaterialTheme.typography.labelLarge)
-                                Text("M-Lab's public Statistics API publishes country-level daily aggregates as JSON, so SpeedTester can compare your test against the recent Mauritius results without a BigQuery key.", color = Muted, style = MaterialTheme.typography.bodySmall)
-                                if (regionalLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                                Text(regionalMessage, color = Muted, style = MaterialTheme.typography.bodySmall)
-                                regionalBenchmark?.let { benchmark ->
-                                    Text("Mauritius · recent published daily medians", fontWeight = FontWeight.SemiBold)
-                                    InfoRow("Reference period", benchmark.firstDate + " to " + benchmark.lastDate)
-                                    InfoRow("M-Lab median download", "%.1f Mbps".format(java.util.Locale.US, benchmark.downloadMedian))
-                                    InfoRow("M-Lab median upload", "%.1f Mbps".format(java.util.Locale.US, benchmark.uploadMedian))
-                                    InfoRow("M-Lab median minimum RTT", benchmark.pingMedian?.let { "%.1f ms".format(java.util.Locale.US, it) } ?: "—")
-                                    InfoRow("Download vs regional median", if (download > 0.0) "%+.0f%%".format(java.util.Locale.US, (download / benchmark.downloadMedian - 1.0) * 100.0) else "Run a test first")
-                                    InfoRow("Upload vs regional median", if (upload > 0.0) "%+.0f%%".format(java.util.Locale.US, (upload / benchmark.uploadMedian - 1.0) * 100.0) else "Run a test first")
-                                    Text("Approx. " + benchmark.sampleCount + " download measurements across the selected period. This is a regional reference, not an ISP-specific guarantee.", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                }
-                                Button(onClick = {
-                                    if (!regionalLoading) scope.launch {
-                                        regionalLoading = true
-                                        regionalMessage = "Fetching public M-Lab statistics…"
-                                        val result = runCatching { withContext(Dispatchers.IO) { RegionalBenchmarkClient.loadMauritius() } }
-                                        regionalBenchmark = result.getOrNull()
-                                        regionalMessage = if (result.isSuccess) "Regional data loaded from M-Lab's public Statistics API." else (result.exceptionOrNull()?.message ?: "Regional data unavailable.")
-                                        regionalLoading = false
-                                    }
-                                }, enabled = !regionalLoading, modifier = Modifier.fillMaxWidth()) { Text(if (regionalLoading) "Loading regional data…" else "Load Mauritius benchmark") }
-                                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.measurementlab.net/data/docs/"))) }) { Text("Explore M-Lab data documentation") }
-                                Text("M-Lab chooses an available nearby server automatically. Server city coordinates are approximate; map tiles are provided by OpenStreetMap.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("MAURITIUS SERVER DIRECTORY", color = Muted, style = MaterialTheme.typography.labelLarge)
+                                Text("Server discovery uses the public Speedtest.net directory and includes only entries marked as located in Mauritius (MU) and HTTPS-capable. Provider servers can change or disappear from the directory.", color = Muted, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -766,7 +739,7 @@ private fun buildServerMapHtml(context: Context, latitude: Double, longitude: Do
           L.circleMarker([$latitude, $longitude], {
             radius: 9, color: '#EAF2F5', weight: 2,
             fillColor: '#13B8A6', fillOpacity: 1
-          }).addTo(map).bindPopup('M-Lab NDT7 test server').openPopup();
+          }).addTo(map).bindPopup('Mauritius Ookla-compatible test server').openPopup();
           setTimeout(function () { map.invalidateSize(); }, 300);
           setTimeout(function () {
             if (loaded === 0) fail('Map is taking too long to load. Check your internet connection and try again.');
@@ -816,43 +789,6 @@ private data class NdtTcpInfo(
 private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int, val downloadTcp: NdtTcpInfo?, val uploadTcp: NdtTcpInfo?, val serverIp: String, val dnsLookupMs: Long)
 private data class NdtMeasurement(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val elapsedSeconds: Double, val tcpInfo: NdtTcpInfo?)
 private data class QualityAssessment(val score: Int, val label: String, val detail: String)
-private data class RegionalBenchmark(val downloadMedian: Double, val uploadMedian: Double, val pingMedian: Double?, val sampleCount: Long, val firstDate: String, val lastDate: String, val year: Int)
-private object RegionalBenchmarkClient {
-    private val client = OkHttpClient.Builder().callTimeout(18, TimeUnit.SECONDS).build()
-    fun loadMauritius(): RegionalBenchmark {
-        val thisYear = java.time.LocalDate.now().year
-        val years = listOf(thisYear, thisYear - 1)
-        for (year in years) {
-            val url = "https://statistics.measurementlab.net/v0/AF/MU/$year/histogram_daily_stats.json"
-            val responseData = runCatching {
-                client.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
-                    if (!response.isSuccessful) error("M-Lab Statistics API returned HTTP " + response.code)
-                    org.json.JSONArray(response.body?.string() ?: "[]")
-                }
-            }.getOrNull() ?: continue
-            val daily = linkedMapOf<String, JSONObject>()
-            for (i in 0 until responseData.length()) {
-                val row = responseData.optJSONObject(i) ?: continue
-                val date = row.optString("date")
-                if (date.isNotBlank() && row.has("download_MED") && row.has("upload_MED")) daily.putIfAbsent(date, row)
-            }
-            val usable = daily.entries.sortedBy { it.key }.takeLast(30).map { it.value }
-            val downloads = usable.mapNotNull { it.optDouble("download_MED", Double.NaN).takeIf { value -> value.isFinite() && value > 0.0 } }
-            val uploads = usable.mapNotNull { it.optDouble("upload_MED", Double.NaN).takeIf { value -> value.isFinite() && value > 0.0 } }
-            val pings = usable.mapNotNull { it.optDouble("download_minRTT_MED", Double.NaN).takeIf { value -> value.isFinite() && value >= 0.0 } }
-            if (downloads.isNotEmpty() && uploads.isNotEmpty()) {
-                val samples = usable.sumOf { it.optLong("dl_samples_day", 0L).coerceAtLeast(0L) }
-                return RegionalBenchmark(median(downloads), median(uploads), pings.takeIf { it.isNotEmpty() }?.let { median(it) }, samples, daily.keys.sorted().takeLast(30).firstOrNull().orEmpty(), daily.keys.sorted().lastOrNull().orEmpty(), year)
-            }
-        }
-        error("M-Lab has no usable Mauritius regional statistics available right now.")
-    }
-    private fun median(values: List<Double>): Double {
-        val sorted = values.sorted()
-        val middle = sorted.size / 2
-        return if (sorted.size % 2 == 0) (sorted[middle - 1] + sorted[middle]) / 2.0 else sorted[middle]
-    }
-}
 private fun assessQuality(download: Double, upload: Double, ping: Long, jitter: Double, loadedPing: Long, failed: Int, probes: Int): QualityAssessment {
     if (download <= 0.0 && upload <= 0.0 && ping < 0L) return QualityAssessment(0, "Not rated", "Run a speed test to calculate a score.")
     val downScore = (download / 100.0).coerceIn(0.0, 1.0) * 35.0
