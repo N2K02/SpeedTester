@@ -939,31 +939,6 @@ private fun buildServerMapHtml(context: Context, servers: List<NdtServerCandidat
         }
     })
 }
-@Composable private fun ServerMapWebView(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
-    val appContext = LocalContext.current
-    val html = remember(latitude, longitude) { buildServerMapHtml(appContext, latitude, longitude) }
-    AndroidView(modifier = modifier, factory = { context ->
-        WebView(context).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#0D151B"))
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = false
-            settings.loadsImagesAutomatically = true
-            settings.blockNetworkImage = false
-            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            settings.userAgentString = settings.userAgentString + " SpeedTester-Android/1.0 (com.speedtester.app)"
-            isVerticalScrollBarEnabled = false
-            isHorizontalScrollBarEnabled = false
-            webViewClient = WebViewClient()
-            tag = html
-            loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
-        }
-    }, update = { view ->
-        if (view.tag != html) {
-            view.tag = html
-            view.loadDataWithBaseURL(MAP_BASE_URL, html, "text/html", "UTF-8", null)
-        }
-    })
-}
 private data class NdtTcpInfo(
     val minRttUs: Long? = null, val rttUs: Long? = null, val rttVarUs: Long? = null,
     val bytesRetrans: Long? = null, val bytesSent: Long? = null, val bytesAcked: Long? = null,
