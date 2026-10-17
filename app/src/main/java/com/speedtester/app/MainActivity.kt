@@ -945,7 +945,7 @@ private object SpeedEngine {
                     if (now - downLastAt >= 250_000_000L) {
                         val instant = (downBytes - downLastBytes) * 8.0 / ((now - downLastAt) / 1_000_000_000.0) / 1_000_000.0
                         downPeak = maxOf(downPeak, instant)
-                        onUpdate("Downloading · Ookla server", (.08f + .42f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.08f, .50f), instant)
+                        onUpdate("Downloading · Ookla server", (.08f + .42f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.08f, .50f), instant.toFloat())
                         downLastAt = now; downLastBytes = downBytes
                     }
                 }
@@ -983,7 +983,7 @@ private object SpeedEngine {
             if (now - upLastAt >= 250_000_000L) {
                 val instant = (totalUpBytes - upLastBytes) * 8.0 / ((now - upLastAt) / 1_000_000_000.0) / 1_000_000.0
                 upPeak = maxOf(upPeak, instant)
-                onUpdate("Uploading · Ookla server", (.55f + .40f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.55f, .95f), instant)
+                onUpdate("Uploading · Ookla server", (.55f + .40f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.55f, .95f), instant.toFloat())
                 upLastAt = now; upLastBytes = totalUpBytes
             }
         }
