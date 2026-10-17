@@ -226,14 +226,14 @@ private fun SpeedTesterApp(context: Context) {
                     NavigationBarItem(
                         selected = activeTab == 2,
                         onClick = {
-                            if (!serversLoading && availableServers.isNotEmpty()) {
+                            if (!serversLoading && serverDiscoveryMs >= 0L) {
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                                     getLastKnownLocation(context)?.let { distanceOrigin = it.latitude to it.longitude }
                                 } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
                                 activeTab = 2
                             }
                         },
-                        enabled = !serversLoading && availableServers.isNotEmpty(),
+                        enabled = !serversLoading && serverDiscoveryMs >= 0L,
                         icon = { Icon(Icons.Default.Bolt, null) },
                         label = { Text("Server") }
                     )
