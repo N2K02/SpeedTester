@@ -112,12 +112,6 @@ private fun SpeedTesterApp(context: Context) {
             serverDiscoveryStatus = "Failed"
         } finally { serversLoading = false }
     }
-    LaunchedEffect(Unit) {
-        while (true) {
-            netInfo = readNetworkInfo(context)
-            kotlinx.coroutines.delay(2500)
-        }
-    }
     val filteredServers = remember(availableServers, serverSearch) {
         availableServers.filter { candidate ->
             candidate.country.equals("MU", true) &&
@@ -158,6 +152,12 @@ private fun SpeedTesterApp(context: Context) {
     val diagnosticLog = remember { mutableStateListOf<String>() }
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            netInfo = readNetworkInfo(context)
+            kotlinx.coroutines.delay(2500)
+        }
+    }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
     LaunchedEffect(activeTab, serverDetails.city, serverDetails.country, serverDetails.latitude, serverDetails.longitude) {
         if (activeTab == 2 && serverDetails.latitude == null && serverDetails.longitude == null && serverDetails.city.isNotBlank()) {
