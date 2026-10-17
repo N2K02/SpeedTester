@@ -12,11 +12,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Update
+import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -64,7 +69,12 @@ private fun SpeedTesterApp(context: Context) {
     var jitter by remember { mutableDoubleStateOf(0.0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
-    var updateMessage by remember { mutableStateOf("") }
+    var updateMessage by remember { mutableStateOf("Tap Check for updates to see the latest release.") }
+    var updateDetails by remember { mutableStateOf("") }
+    var updateVersion by remember { mutableStateOf("") }
+    var updateUrl by remember { mutableStateOf("") }
+    var updateAvailable by remember { mutableStateOf(false) }
+    val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     val samples = remember { mutableStateListOf<Float>() }
     val history = remember {
@@ -80,7 +90,7 @@ private fun SpeedTesterApp(context: Context) {
         Scaffold(
             topBar = {
                 TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = Muted) } },
-                    actions = { IconButton(onClick = { scope.launch { updateMessage = "Checking GitHub Releases…"; updateMessage = withContext(Dispatchers.IO) { UpdateChecker.check(context) } } }) { Icon(Icons.Default.Download, "Check updates") } },
+                    actions = {},
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0B1117)))
             },
             bottomBar = {
@@ -88,6 +98,7 @@ private fun SpeedTesterApp(context: Context) {
                     NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
                     NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
                     NavigationBarItem(selected = activeTab == 2, onClick = { activeTab = 2 }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") })
+                    NavigationBarItem(selected = activeTab == 3, onClick = { activeTab = 3 }, icon = { Icon(Icons.Default.Update, null) }, label = { Text("Updates") })
                 }
             }, containerColor = Color(0xFF0B1117)
         ) { padding ->
@@ -101,7 +112,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Text(String.format("%.1f", download), style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold, color = Color.White)
                                 Text("DOWNLOAD Mbps", color = Teal, style = MaterialTheme.typography.labelMedium)
                                 Spacer(Modifier.height(10.dp))
-                                BandwidthChart(samples.toList(), Modifier.fillMaxWidth().height(100.dp))
+                                BandwidthChart(samples.toList(), Modifier.fillMaxWidth().height(150.dp))
                                 Spacer(Modifier.height(12.dp))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     Metric("UPLOAD", if (upload > 0) String.format("%.1f", upload) else "—", "Mbps")
@@ -111,26 +122,39 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; samples.clear(); status = "Measuring latency…"
+                                        testing = true; error = null; progress = 0f; samples.clear(); status = "Measuring latency…"; activityLog.clear(); activityLog.add("Starting test against " + endpoint.trim()); activityLog.add("Checking TCP connection latency…")
                                         scope.launch {
                                             try {
                                                 val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value, mbps ->
                                                     status = phase; progress = value
-                                                    if (mbps > 0f) { samples.add(mbps); if (samples.size > 80) samples.removeAt(0) }
+                                                    if (activityLog.lastOrNull() != phase) { activityLog.add(phase + " phase started"); if (activityLog.size > 8) activityLog.removeAt(0) }
+                                                    if (mbps > 0f) { samples.add(mbps); if (samples.size > 80) samples.removeAt(0); if (activityLog.lastOrNull()?.startsWith("Live rate:") != true) { activityLog.add("Live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps)); if (activityLog.size > 8) activityLog.removeAt(0) } else { activityLog[activityLog.lastIndex] = "Live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps) } }
                                                 }, { p, j -> ping = p; jitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint)
                                                 history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
                                                 val arr = org.json.JSONArray()
                                                 history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download).put("upload", x.upload).put("ping", x.ping).put("jitter", x.jitter).put("server", x.server)) }
-                                                prefs.edit().putString("history", arr.toString()).apply(); status = "Test complete"
-                                            } catch (e: Exception) { error = e.message ?: "Test failed"; status = "Test failed" }
+                                                prefs.edit().putString("history", arr.toString()).apply(); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); while (activityLog.size > 8) activityLog.removeAt(0)
+                                            } catch (e: Exception) { error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
                                         }
                                     }
                                 }, enabled = !testing, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { Text(if (testing) "TEST RUNNING…" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
                                 error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                            }
+                        }
+                    }
+                    item { Text("LIVE DIAGNOSTICS", color = Muted, style = MaterialTheme.typography.labelLarge) }
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Timeline, null, tint = Teal); Spacer(Modifier.width(8.dp)); Text("Latest activity", fontWeight = FontWeight.SemiBold) }
+                                Spacer(Modifier.height(8.dp))
+                                Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    activityLog.takeLast(8).forEach { line -> Text("• " + line, color = if (line.startsWith("ERROR")) MaterialTheme.colorScheme.error else Muted, style = MaterialTheme.typography.bodySmall) }
+                                }
                             }
                         }
                     }
@@ -171,7 +195,7 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                else -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                2 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
                     item { Text("LibreSpeed-compatible server base URL", color = Muted) }
                     item { OutlinedTextField(value = endpoint, onValueChange = { endpoint = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Server URL") }) }
@@ -187,6 +211,33 @@ private fun SpeedTesterApp(context: Context) {
                     item { Text("Updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     item { Text("Current version " + BuildConfig.VERSION_NAME + ". Tap the download icon above to check GitHub Releases.", color = Muted) }
                     if (updateMessage.isNotBlank()) item { Text(updateMessage, color = Teal) }
+                }
+                else -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    item { Text("App updates", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Update, null, tint = Teal, modifier = Modifier.size(30.dp)); Spacer(Modifier.width(12.dp)); Column { Text("SpeedTester", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text("Installed version " + BuildConfig.VERSION_NAME, color = Muted, style = MaterialTheme.typography.bodySmall) } }
+                                if (updateVersion.isNotBlank()) Text("Latest version: " + updateVersion, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(updateMessage, color = Muted)
+                                if (updateDetails.isNotBlank()) { HorizontalDivider(color = Color(0xFF26343E)); Text("What's new", fontWeight = FontWeight.SemiBold); Text(updateDetails, color = Muted, style = MaterialTheme.typography.bodyMedium) }
+                                Button(onClick = {
+                                    scope.launch {
+                                        updateMessage = "Checking GitHub Releases…"
+                                        val result = withContext(Dispatchers.IO) { UpdateChecker.getRelease(context) }
+                                        updateVersion = result.version
+                                        updateDetails = result.notes
+                                        updateUrl = result.apkUrl
+                                        updateAvailable = result.available
+                                        updateMessage = result.message
+                                    }
+                                }, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
+                                if (updateAvailable && updateUrl.isNotBlank()) Button(onClick = {
+                                    scope.launch { updateMessage = withContext(Dispatchers.IO) { UpdateChecker.downloadAndInstall(context, updateUrl) } }
+                                }, modifier = Modifier.fillMaxWidth()) { Text("Download and install") }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -273,40 +324,42 @@ private object SpeedEngine {
         onUpdate("Complete", 1f, 0f); SpeedOutcome(downloadMbps, uploadMbps, ping, jitter)
     }
 }
+private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String)
 private object UpdateChecker {
     private const val API = "https://api.github.com/repos/N2K02/SpeedTester/releases/latest"
-    fun check(context: Context): String {
-        return try {
-            val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
-            val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("User-Agent", "SpeedTester-Android").build()
-            val json = client.newCall(request).execute().use { r -> check(r.isSuccessful) { "GitHub returned HTTP " + r.code }; JSONObject(r.body?.string() ?: "{}") }
-            val tag = json.optString("tag_name").removePrefix("v")
-            val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
-            if (compareVersions(tag, current) <= 0) return "You're up to date (v" + current + ")."
-            val assets = json.optJSONArray("assets") ?: return "Version " + tag + " is available, but no APK is attached yet."
-            var apkUrl: String? = null
-            for (i in 0 until assets.length()) { val asset = assets.getJSONObject(i); if (asset.optString("name").endsWith(".apk", true)) { apkUrl = asset.optString("browser_download_url"); break } }
-            if (apkUrl.isNullOrBlank()) return "Version " + tag + " is available, but no APK is attached yet."
-            if (!context.packageManager.canRequestPackageInstalls()) {
-                val settings = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(settings)
-                return "Version " + tag + " is available. Allow installs from SpeedTester, then check for updates again."
-            }
-            val apkResponse = client.newCall(Request.Builder().url(apkUrl).header("User-Agent", "SpeedTester-Android").build()).execute()
-            val apkFile = File(context.cacheDir, "updates/SpeedTester-update.apk")
-            apkFile.parentFile?.mkdirs()
-            apkResponse.use { response ->
-                check(response.isSuccessful) { "APK download failed: HTTP " + response.code }
-                val body = response.body ?: error("GitHub returned an empty APK")
-                body.byteStream().use { input -> apkFile.outputStream().use { output -> input.copyTo(output) } }
-            }
-            val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
-            val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(install)
-            "Downloaded SpeedTester " + tag + ". Android's installer is ready."
-        } catch (e: Exception) { "Update check failed: " + (e.message ?: "network error") }
-    }
+    fun getRelease(context: Context): ReleaseInfo = try {
+        val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
+        val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("User-Agent", "SpeedTester-Android").build()
+        val json = client.newCall(request).execute().use { r -> check(r.isSuccessful) { "GitHub returned HTTP " + r.code }; JSONObject(r.body?.string() ?: "{}") }
+        val tag = json.optString("tag_name").removePrefix("v")
+        val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+        val notes = json.optString("body").ifBlank { "No release notes were provided." }
+        var apkUrl = ""
+        val assets = json.optJSONArray("assets")
+        if (assets != null) for (i in 0 until assets.length()) { val asset = assets.getJSONObject(i); if (asset.optString("name").endsWith(".apk", true)) { apkUrl = asset.optString("browser_download_url"); break } }
+        val available = compareVersions(tag, current) > 0 && apkUrl.isNotBlank()
+        val message = when {
+            compareVersions(tag, current) <= 0 -> "You're up to date."
+            apkUrl.isBlank() -> "A newer release exists, but no APK is attached yet."
+            else -> "A new version is available."
+        }
+        ReleaseInfo(tag, notes, apkUrl, available, message)
+    } catch (e: Exception) { ReleaseInfo("", "", "", false, "Update check failed: " + (e.message ?: "network error")) }
+    fun downloadAndInstall(context: Context, apkUrl: String): String = try {
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return "Allow installs from SpeedTester, then tap Download and install again."
+        }
+        val client = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
+        val response = client.newCall(Request.Builder().url(apkUrl).header("User-Agent", "SpeedTester-Android").build()).execute()
+        val apkFile = File(context.cacheDir, "updates/SpeedTester-update.apk")
+        apkFile.parentFile?.mkdirs()
+        response.use { r -> check(r.isSuccessful) { "APK download failed: HTTP " + r.code }; val body = r.body ?: error("GitHub returned an empty APK"); body.byteStream().use { input -> apkFile.outputStream().use { output -> input.copyTo(output) } } }
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
+        val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(install)
+        "APK downloaded. Android's installer is ready."
+    } catch (e: Exception) { "Update failed: " + (e.message ?: "network error") }
     private fun compareVersions(a: String, b: String): Int {
         val x = a.split(".").map { it.toIntOrNull() ?: 0 }; val y = b.split(".").map { it.toIntOrNull() ?: 0 }
         for (i in 0 until max(x.size, y.size)) { val d = (x.getOrNull(i) ?: 0).compareTo(y.getOrNull(i) ?: 0); if (d != 0) return d }
