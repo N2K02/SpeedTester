@@ -113,6 +113,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Text("DOWNLOAD Mbps", color = Teal, style = MaterialTheme.typography.labelMedium)
                                 Spacer(Modifier.height(10.dp))
                                 BandwidthChart(samples.toList(), Modifier.fillMaxWidth().height(150.dp))
+                                Text("LIVE THROUGHPUT · AUTO-SCALED · LAST 80 SAMPLES", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 Spacer(Modifier.height(12.dp))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     Metric("UPLOAD", if (upload > 0) String.format("%.1f", upload) else "—", "Mbps")
@@ -250,14 +251,21 @@ private fun SpeedTesterApp(context: Context) {
 @Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = Muted); Text(value, fontWeight = FontWeight.Medium) } }
 @Composable private fun BandwidthChart(samples: List<Float>, modifier: Modifier = Modifier) {
     Canvas(modifier.background(Color(0xFF0D151B), RoundedCornerShape(12.dp)).padding(8.dp)) {
+        val maxValue = max(10f, samples.maxOrNull() ?: 10f)
+        for (i in 0..4) {
+            val y = size.height * i / 4f
+            drawLine(Color(0xFF26343E), Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+        }
         if (samples.size < 2) return@Canvas
-        val maxValue = max(1f, samples.maxOrNull() ?: 1f); val path = Path()
+        val path = Path()
         samples.forEachIndexed { i, value ->
-            val x = size.width * i / (samples.size - 1).toFloat(); val y = size.height - (value / maxValue) * size.height
+            val x = size.width * i / (samples.size - 1).toFloat()
+            val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-        drawPath(path, Teal, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
-        for (i in 1..3) drawLine(Color(0xFF26343E), Offset(0f, size.height * i / 4), Offset(size.width, size.height * i / 4), 1.dp.toPx())
+        drawPath(path, Teal, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        val last = samples.last()
+        drawCircle(Teal, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height))
     }
 }
 private data class NetworkInfo(val type: String, val connected: Boolean, val signal: String, val link: String, val frequency: String)
