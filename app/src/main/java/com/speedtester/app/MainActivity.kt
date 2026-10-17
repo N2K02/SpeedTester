@@ -1277,7 +1277,7 @@ private object UpdateChecker {
     private const val API = "https://api.github.com/repos/N2K02/SpeedTester/releases/latest"
     fun getRelease(context: Context): ReleaseInfo = try {
         val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
-        val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("User-Agent", "SpeedTester-Android").build()
+        val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "SpeedTester-Android").build()
         val json = client.newCall(request).execute().use { r -> check(r.isSuccessful) { "GitHub returned HTTP " + r.code }; JSONObject(r.body?.string() ?: "{}") }
         val tag = json.optString("tag_name").removePrefix("v")
         val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
