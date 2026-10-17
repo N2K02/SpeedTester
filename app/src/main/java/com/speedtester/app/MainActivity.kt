@@ -115,6 +115,8 @@ private fun SpeedTesterApp(context: Context) {
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
+    var serverDiscoveryMs by remember { mutableLongStateOf(-1L) }
+    var serverDiscoveryStatus by remember { mutableStateOf("Not run yet") }
     LaunchedEffect(activeTab, serverDetails.city, serverDetails.country, serverDetails.latitude, serverDetails.longitude) {
         if (activeTab == 2 && serverDetails.latitude == null && serverDetails.longitude == null && serverDetails.city.isNotBlank()) {
             val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(serverDetails.city, serverDetails.country) }
@@ -197,7 +199,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
-                                        testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Preparing server connection and TCP latency probes"); activityLog.add("Target: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                        testing = true; error = null; progress = 0f; serverDiscoveryMs = -1L; serverDiscoveryStatus = "Discovering…"; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating server URL"); activityLog.add("Preparing server connection and TCP latency probes"); activityLog.add("Target: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                         diagnosticLog.clear()
                                         logDiagnostic("========== SPEED TEST START ==========")
                                         logDiagnostic("Target URL: " + endpoint.trim())
@@ -218,7 +220,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     status = phase; progress = value
                                                     if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
-                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message) } })
+                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
                                                 serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
@@ -229,7 +231,7 @@ private fun SpeedTesterApp(context: Context) {
                                                 val arr = org.json.JSONArray()
                                                 history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)) }
                                                 prefs.edit().putString("history", arr.toString()).apply(); logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
-                                            } catch (e: Exception) { logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                            } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
                                         }
                                     }
@@ -255,8 +257,12 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                InfoRow("Discovery status", serverDiscoveryStatus)
+                                InfoRow("Discovery time", if (serverDiscoveryMs >= 0) "$serverDiscoveryMs ms" else "—")
                                 InfoRow("Test server", serverDetails.host.ifBlank { "Not selected yet" })
                                 InfoRow("Server location", serverDetails.location.ifBlank { "Not available yet" })
+                                InfoRow("Selected-server ping", if (ping >= 0) "$ping ms" else "Measured during test")
+                                Text("M-Lab selects an available nearby server; nearest does not always mean fastest.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 InfoRow("Protocol", "M-Lab NDT7 · secure WebSocket")
                                  InfoRow("Network", netInfo.type); InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
                                 InfoRow("Wi-Fi signal", netInfo.signal); InfoRow("Signal quality", netInfo.quality); InfoRow("Wi-Fi link speed", netInfo.link); InfoRow("Frequency / band", netInfo.frequency); InfoRow("Connection note", netInfo.note)
@@ -786,11 +792,14 @@ private object SpeedEngine {
         onLog("Engine: M-Lab NDT7 over secure WebSockets")
         onLog("Discovery URL: " + locateUrl)
         onLog("NDT7 subprotocol: " + PROTOCOL)
+        val discoveryStartedAt = System.nanoTime()
         val json = client.newCall(Request.Builder().url(locateUrl).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
             onLog("DISCOVERY HTTP " + response.code + " " + response.message)
             if (!response.isSuccessful) error("M-Lab discovery failed: HTTP " + response.code)
             JSONObject(response.body?.string() ?: error("M-Lab returned an empty response"))
         }
+        val discoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStartedAt)
+        onLog("DISCOVERY TIME: " + discoveryMs + "ms")
         val results = json.optJSONArray("results") ?: error("M-Lab discovery returned no server results")
         var downUrl = ""
         var upUrl = ""
@@ -819,6 +828,7 @@ private object SpeedEngine {
             }
         }
         if (downUrl.isBlank() || upUrl.isBlank()) error("M-Lab discovery found no usable secure NDT7 server")
+        onLog("DISCOVERY STATUS: success")
         val uri = java.net.URI(downUrl)
         val host = uri.host ?: error("M-Lab returned an invalid server URL")
         val port = if (uri.port > 0) uri.port else 443
