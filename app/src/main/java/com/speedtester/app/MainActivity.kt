@@ -114,9 +114,9 @@ private fun SpeedTesterApp(context: Context) {
                                         testing = true; error = null; progress = 0f; samples.clear(); status = "Measuring latency…"
                                         scope.launch {
                                             try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value ->
+                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), { phase, value, mbps ->
                                                     status = phase; progress = value
-                                                    if (phase == "Downloading" || phase == "Uploading") { samples.add(value); if (samples.size > 80) samples.removeAt(0) }
+                                                    if (mbps > 0f) { samples.add(mbps); if (samples.size > 80) samples.removeAt(0) }
                                                 }, { p, j -> ping = p; jitter = j })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, endpoint)
@@ -181,7 +181,7 @@ private fun SpeedTesterApp(context: Context) {
                             if (valid) { prefs.edit().putString("endpoint", endpoint.trim().trimEnd('/')).apply(); updateMessage = "Server saved" } else updateMessage = "Enter a valid HTTP(S) URL"
                         }) { Text("Save server") }
                     }
-                    item { Text("Default server: librespeed.org. A compatible backend should provide empty.php, garbage.php and latency.php. Public speed-test providers require a supported API or compatible endpoint.", color = Muted, style = MaterialTheme.typography.bodySmall) }
+                    item { Text("Choose https://speed.cloudflare.com for Cloudflare's public download/upload endpoints, or use a LibreSpeed-compatible backend URL containing empty.php and garbage.php. Other providers need a documented endpoint or compatible server; arbitrary speed-test sites cannot safely be treated as interchangeable.", color = Muted, style = MaterialTheme.typography.bodySmall) }
                     item { Text("Data usage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                     item { Text("A full test transfers several megabytes. Tests run only on demand; no background speed testing.", color = Muted) }
                     item { Text("Updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
@@ -231,7 +231,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
 private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double)
 private object SpeedEngine {
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).writeTimeout(20, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build()
-    suspend fun run(base: String, onUpdate: (String, Float) -> Unit, onMetrics: (Long, Double) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+    suspend fun run(base: String, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
         require(base.startsWith("https://") || base.startsWith("http://")) { "Server URL must start with HTTP or HTTPS" }
         val parsed = URL(base); val host = parsed.host; val port = if (parsed.port > 0) parsed.port else if (base.startsWith("https")) 443 else 80
         val pings = mutableListOf<Long>()
@@ -245,8 +245,10 @@ private object SpeedEngine {
         }
         val ping = pings.average().toLong()
         val jitter = if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
-        onUpdate("Downloading", .08f)
-        val request = Request.Builder().url(base + "/empty.php?cors=true&size=8000000&nocache=" + System.nanoTime()).header("Cache-Control", "no-cache").build()
+        onUpdate("Downloading", .08f, 0f)
+        val cloudflare = URL(base).host.equals("speed.cloudflare.com", ignoreCase = true)
+        val downloadUrl = if (cloudflare) base + "/__down?bytes=8000000&nocache=" + System.nanoTime() else base + "/empty.php?cors=true&size=8000000&nocache=" + System.nanoTime()
+        val request = Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").build()
         val started = System.nanoTime(); var bytes = 0L
         client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Download failed: HTTP " + response.code + ". Check server URL." }
@@ -254,17 +256,21 @@ private object SpeedEngine {
             while (true) {
                 val n = stream.read(buffer); if (n < 0) break; bytes += n
                 val fraction = (bytes.toDouble() / 8_000_000.0).coerceIn(0.0, 1.0)
-                onUpdate("Downloading", (.08 + .42 * fraction).toFloat())
+                val elapsed = (System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0
+                val liveMbps = (bytes * 8.0 / elapsed / 1_000_000.0).toFloat()
+                onUpdate("Downloading", (.08 + .42 * fraction).toFloat(), liveMbps)
             }
         }
         val downloadMbps = bytes * 8.0 / ((System.nanoTime() - started).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
-        onUpdate("Uploading", .55f)
+        onUpdate("Uploading", .55f, 0f)
         val payload = ByteArray(2_000_000); java.security.SecureRandom().nextBytes(payload)
-        val uploadRequest = Request.Builder().url(base + "/garbage.php?cors=true&nocache=" + System.nanoTime()).post(payload.toRequestBody(null)).header("Cache-Control", "no-cache").build()
+        val uploadUrl = if (cloudflare) base + "/__up?nocache=" + System.nanoTime() else base + "/garbage.php?cors=true&nocache=" + System.nanoTime()
+        val uploadRequest = Request.Builder().url(uploadUrl).post(payload.toRequestBody(null)).header("Cache-Control", "no-cache").build()
         val uploadStart = System.nanoTime()
         client.newCall(uploadRequest).execute().use { response -> check(response.isSuccessful) { "Upload failed: HTTP " + response.code + ". Check server upload support." } }
         val uploadMbps = payload.size * 8.0 / ((System.nanoTime() - uploadStart).coerceAtLeast(1) / 1_000_000_000.0) / 1_000_000.0
-        onUpdate("Complete", 1f); SpeedOutcome(downloadMbps, uploadMbps, ping, jitter)
+        onUpdate("Uploading", .95f, uploadMbps.toFloat())
+        onUpdate("Complete", 1f, 0f); SpeedOutcome(downloadMbps, uploadMbps, ping, jitter)
     }
 }
 private object UpdateChecker {
