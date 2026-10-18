@@ -12,8 +12,11 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +45,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +55,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import okhttp3.Cache
 import okhttp3.Call
 import okhttp3.Callback
@@ -331,6 +336,46 @@ private fun markerScreenPosition(marker: MapMarker, camera: MapCameraState, widt
     return Offset((width / 2.0 + dx * world).toFloat(), (height / 2.0 + dy * world).toFloat())
 }
 
+/** Pins whose tips are closer than this on screen are drawn as one pin with a count. */
+private const val PIN_MERGE_RADIUS_DP = 24
+/** Distance from a pin's tip up to the centre of its round head (see drawPin). */
+private const val PIN_HEAD_LIFT_DP = 19
+
+private class PinCluster(val tip: Offset, val markers: List<MapMarker>)
+
+/** Groups server markers that would overlap at the current zoom. Origin markers are excluded. */
+private fun clusterPins(markers: List<MapMarker>, camera: MapCameraState, width: Int, height: Int, tileSize: Float, mergeRadiusPx: Float): List<PinCluster> {
+    val tips = ArrayList<Offset>()
+    val groups = ArrayList<MutableList<MapMarker>>()
+    for (marker in markers) {
+        if (marker.isOrigin) continue
+        val tip = markerScreenPosition(marker, camera, width, height, tileSize)
+        val index = tips.indices.firstOrNull { (tips[it] - tip).getDistance() <= mergeRadiusPx }
+        if (index == null) {
+            tips.add(tip)
+            groups.add(mutableListOf(marker))
+        } else {
+            groups[index].add(marker)
+        }
+    }
+    return tips.indices.map { PinCluster(tips[it], groups[it]) }
+}
+
+private val badgeTextPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+    color = android.graphics.Color.WHITE
+    textAlign = android.graphics.Paint.Align.CENTER
+    typeface = android.graphics.Typeface.DEFAULT_BOLD
+}
+
+private fun DrawScope.drawCountBadge(tip: Offset, count: Int) {
+    val center = Offset(tip.x + 11.dp.toPx(), tip.y - 30.dp.toPx())
+    drawCircle(Color.White, radius = 9.dp.toPx(), center = center)
+    drawCircle(Color(0xFF101820), radius = 7.5f.dp.toPx(), center = center)
+    badgeTextPaint.textSize = 10.sp.toPx()
+    val baseline = center.y - (badgeTextPaint.descent() + badgeTextPaint.ascent()) / 2f
+    drawContext.canvas.nativeCanvas.drawText(count.toString(), center.x, baseline, badgeTextPaint)
+}
+
 private val MapBackground = Color(0xFF0D151B)
 private val MapGridLine = Color(0xFF18242E)
 private val OriginBlue = Color(0xFF3D8BFF)
@@ -350,7 +395,7 @@ internal fun OsmTileMap(
     val density = LocalDensity.current.density
     val tileSize = mapTileSizePx(density)
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    var selectedIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var successes by remember { mutableIntStateOf(0) }
     var failures by remember { mutableIntStateOf(0) }
     var lastError by remember { mutableStateOf<String?>(null) }
@@ -413,7 +458,7 @@ internal fun OsmTileMap(
     // Reading the version here recomposes the overlays when tiles arrive.
     val tileVersion = MapTileLoader.version.intValue
     val anyVisibleTileLoaded = remember(neededUrls, tileVersion) { neededUrls.any { MapTileLoader.get(it) != null } }
-    val selected = markers.firstOrNull { it.id == selectedId }
+    val selected = selectedIds.mapNotNull { id -> markers.firstOrNull { it.id == id } }
 
     Box(modifier.background(MapBackground)) {
         Canvas(
@@ -435,16 +480,19 @@ internal fun OsmTileMap(
                         },
                         onTap = { point ->
                             val hitRadius = 28.dp.toPx()
-                            val pinLift = 14.dp.toPx()
-                            val hit = currentMarkers
-                                .map { marker ->
-                                    val p = markerScreenPosition(marker, camera, viewSize.width, viewSize.height, tileSize)
-                                    val anchor = if (marker.isOrigin) p else Offset(p.x, p.y - pinLift)
-                                    marker to (anchor - point).getDistance()
-                                }
+                            val headLift = PIN_HEAD_LIFT_DP.dp.toPx()
+                            val clusters = clusterPins(currentMarkers, camera, viewSize.width, viewSize.height, tileSize, PIN_MERGE_RADIUS_DP.dp.toPx())
+                            val pinHit = clusters
+                                .map { it to (Offset(it.tip.x, it.tip.y - headLift) - point).getDistance() }
                                 .filter { it.second <= hitRadius }
                                 .minByOrNull { it.second }
-                            selectedId = hit?.first?.id
+                            selectedIds = if (pinHit != null) {
+                                pinHit.first.markers.map { it.id }
+                            } else {
+                                currentMarkers.filter { it.isOrigin }
+                                    .firstOrNull { (markerScreenPosition(it, camera, viewSize.width, viewSize.height, tileSize) - point).getDistance() <= hitRadius }
+                                    ?.let { listOf(it.id) } ?: emptyList()
+                            }
                         }
                     )
                 }
@@ -452,8 +500,10 @@ internal fun OsmTileMap(
             MapTileLoader.version.intValue // redraw when tiles arrive
             drawTiles(camera, source, tileSize)
             currentMarkers.filter { it.isOrigin }.forEach { drawOriginMarker(markerScreenPosition(it, camera, size.width.toInt(), size.height.toInt(), tileSize)) }
-            currentMarkers.filter { !it.isOrigin }.forEach {
-                drawPin(markerScreenPosition(it, camera, size.width.toInt(), size.height.toInt(), tileSize), selected = it.id == selectedId)
+            // Servers that share (or nearly share) a position are merged into one pin with a count badge.
+            clusterPins(currentMarkers, camera, size.width.toInt(), size.height.toInt(), tileSize, PIN_MERGE_RADIUS_DP.dp.toPx()).forEach { cluster ->
+                drawPin(cluster.tip, selected = cluster.markers.any { it.id in selectedIds })
+                if (cluster.markers.size > 1) drawCountBadge(cluster.tip, cluster.markers.size)
             }
         }
 
@@ -473,14 +523,23 @@ internal fun OsmTileMap(
             }
         }
 
-        if (selected != null) {
+        if (selected.isNotEmpty()) {
             Column(
                 Modifier.align(Alignment.BottomStart).padding(start = 10.dp, end = 84.dp, bottom = 30.dp)
                     .widthIn(max = 320.dp)
-                    .background(Color(0xF0101820), RoundedCornerShape(12.dp)).padding(12.dp)
+                    .heightIn(max = 230.dp)
+                    .background(Color(0xF0101820), RoundedCornerShape(12.dp))
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp)
             ) {
-                Text(selected.title, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                if (selected.snippet.isNotBlank()) Text(selected.snippet, color = Color(0xFF9FB0BA), style = MaterialTheme.typography.bodySmall)
+                if (selected.size > 1) {
+                    Text("${selected.size} servers at this location", color = PinTeal, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                }
+                selected.forEachIndexed { index, marker ->
+                    Text(marker.title, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = if (index == 0 && selected.size == 1) 0.dp else 6.dp))
+                    if (marker.snippet.isNotBlank()) Text(marker.snippet, color = Color(0xFF9FB0BA), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 
