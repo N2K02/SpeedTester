@@ -980,7 +980,7 @@ private fun ServerMapView(
                         else -> openStreetMapTileSource()
                     }
                     map.setTileSource(source)
-                    onMapLog("Tile style changed to $tileStyle; source=${source.name}; minZoom=${source.minimumZoomLevel}; maxZoom=${source.maximumZoomLevel}")
+                    onMapLog("Tile style changed to $tileStyle; source=${source.name()}; minZoom=${source.minimumZoomLevel}; maxZoom=${source.maximumZoomLevel}")
                     map.tag = Pair(tileStyle, previousTag?.second as? String ?: "")
                     map.invalidate()
                 }
