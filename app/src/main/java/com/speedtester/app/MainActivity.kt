@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -101,12 +102,16 @@ private fun SpeedTesterApp(context: Context) {
     var serverSearch by remember { mutableStateOf("") }
     var serverPage by remember { mutableIntStateOf(0) }
     var distanceOrigin by remember { mutableStateOf(-20.2 to 57.5) }
-    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            val location = getLastKnownLocation(context)
-            if (location != null) distanceOrigin = location.latitude to location.longitude
-        }
+    var userLocated by remember { mutableStateOf(false) }
+    val onDeviceLocation: (Location) -> Unit = { location ->
+        distanceOrigin = location.latitude to location.longitude
+        userLocated = true
     }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) requestDeviceLocation(context, onDeviceLocation)
+    }
+    // If permission was granted earlier, start locating straight away so the map can open on the user.
+    LaunchedEffect(Unit) { requestDeviceLocation(context, onDeviceLocation) }
     LaunchedEffect(Unit) {
         serversLoading = true
         serversError = ""
@@ -229,7 +234,7 @@ private fun SpeedTesterApp(context: Context) {
                         onClick = {
                             if (!serversLoading && serverDiscoveryMs >= 0L) {
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                                    getLastKnownLocation(context)?.let { distanceOrigin = it.latitude to it.longitude }
+                                    requestDeviceLocation(context, onDeviceLocation)
                                 } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
                                 activeTab = 2
                             }
@@ -583,7 +588,7 @@ private fun SpeedTesterApp(context: Context) {
                                     Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                     val mapped = serversWithDistance.filter { it.latitude != null && it.longitude != null }
                                     if (mapped.isNotEmpty()) {
-                                        ServerMapView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(420.dp), onMapLog = { message ->
+                                        ServerMapView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(420.dp), userLocated = userLocated, onMapLog = { message ->
                                             val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
                                             activityLog.add("MAP $stamp · $message")
                                             while (activityLog.size > 8) activityLog.removeAt(0)
@@ -872,6 +877,8 @@ private object ServerGeoLocator {
     InfoRow("Receiver-window limited", info.receiverLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
+private const val USER_LOCATION_ZOOM = 11.0
+
 /**
  * Server map drawn natively in Compose (see OsmMap.kt). Controls are Compose overlays; the camera is
  * re-framed only when the server data or distance origin changes, not on every recomposition.
@@ -882,6 +889,7 @@ private fun ServerMapView(
     originLat: Double,
     originLon: Double,
     modifier: Modifier = Modifier,
+    userLocated: Boolean = false,
     onMapLog: (String) -> Unit = {}
 ) {
     val density = LocalDensity.current
@@ -892,9 +900,12 @@ private fun ServerMapView(
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     val camera = remember { MapCameraState(originLat, originLon, 8.0) }
 
-    val markers = remember(servers, originLat, originLon) {
+    val markers = remember(servers, originLat, originLon, userLocated) {
         buildList {
-            add(MapMarker("origin", originLat, originLon, "Distance reference", "Used to calculate approximate server distances", isOrigin = true))
+            add(
+                if (userLocated) MapMarker("origin", originLat, originLon, "Your location", "Approximate device location, used for server distances", isOrigin = true)
+                else MapMarker("origin", originLat, originLon, "Distance reference", "Your location is unavailable, so distances use central Mauritius", isOrigin = true)
+            )
             servers.forEachIndexed { index, server ->
                 val lat = server.latitude
                 val lon = server.longitude
@@ -908,12 +919,27 @@ private fun ServerMapView(
     }
     val serverPoints = remember(markers) { markers.filter { !it.isOrigin }.map { it.latitude to it.longitude } }
 
-    // Frame the origin and server pins when data changes (and once the map has a size).
-    LaunchedEffect(markers, viewSize) {
-        if (viewSize.width > 0 && viewSize.height > 0) {
+    // Start on the user's location when it is known; otherwise frame every server pin.
+    // Keyed on a ~1 km rounded position so small location refinements don't yank the map around.
+    val originKey = if (userLocated) "%.2f,%.2f".format(java.util.Locale.US, originLat, originLon) else "unlocated"
+    val mapReady = viewSize.width > 0 && viewSize.height > 0
+    LaunchedEffect(originKey, mapReady, if (userLocated) Unit else markers) {
+        if (!mapReady) return@LaunchedEffect
+        if (userLocated) {
+            camera.moveTo(originLat, originLon, USER_LOCATION_ZOOM)
+            onMapLog("Map centred on your location; zoom=$USER_LOCATION_ZOOM")
+        } else {
             camera.fit(markers.map { it.latitude to it.longitude }, viewSize.width, viewSize.height, framePadding, tileSize)
-            onMapLog("Map framed; markers=${markers.size}; zoom=${"%.1f".format(java.util.Locale.US, camera.zoom)}; size=${viewSize.width}x${viewSize.height}")
+            onMapLog("Location unavailable; map framed on all servers; zoom=${"%.1f".format(java.util.Locale.US, camera.zoom)}")
         }
+    }
+
+    // Explain pin counts: servers in the same city share one coordinate and are drawn as one numbered pin.
+    LaunchedEffect(servers) {
+        val located = servers.filter { it.latitude != null && it.longitude != null }
+        val distinct = located.map { "%.4f,%.4f".format(java.util.Locale.US, it.latitude, it.longitude) }.distinct().size
+        onMapLog("Servers on map=${located.size}; distinct pin locations=$distinct; without coordinates=${servers.size - located.size}")
+        located.forEach { onMapLog("Server ${it.serverId.ifBlank { it.host }} ${it.sponsor.ifBlank { it.host }} · ${it.city} @ ${it.latitude},${it.longitude}") }
     }
 
     Box(modifier = modifier) {
@@ -973,7 +999,7 @@ private fun ServerMapView(
             TextButton(onClick = { camera.zoomAround(center, viewSize.width, viewSize.height, tileSize, kotlin.math.ceil(camera.zoom) - 1.0) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
                 Text("−", color = Color.White, style = MaterialTheme.typography.titleLarge)
             }
-            TextButton(onClick = { camera.moveTo(originLat, originLon, 8.0) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+            TextButton(onClick = { camera.moveTo(originLat, originLon, if (userLocated) USER_LOCATION_ZOOM else 9.0) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                 Text("Here", color = Teal, style = MaterialTheme.typography.labelMedium)
             }
             TextButton(onClick = {
@@ -1029,6 +1055,25 @@ private fun getLastKnownLocation(context: Context): Location? {
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
     return listOf(LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER, LocationManager.GPS_PROVIDER)
         .firstNotNullOfOrNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+}
+/**
+ * Reports the device location: the last known fix immediately (if any), then a fresh fix from the
+ * fused or network provider when it arrives. Needs only coarse location; does nothing without permission.
+ */
+private fun requestDeviceLocation(context: Context, onLocation: (Location) -> Unit) {
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+    getLastKnownLocation(context)?.let(onLocation)
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
+    val provider = when {
+        android.os.Build.VERSION.SDK_INT >= 31 && runCatching { manager.isProviderEnabled(LocationManager.FUSED_PROVIDER) }.getOrDefault(false) -> LocationManager.FUSED_PROVIDER
+        runCatching { manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false) -> LocationManager.NETWORK_PROVIDER
+        else -> return
+    }
+    runCatching {
+        LocationManagerCompat.getCurrentLocation(
+            manager, provider, null as android.os.CancellationSignal?, ContextCompat.getMainExecutor(context)
+        ) { location -> if (location != null) onLocation(location) }
+    }
 }
 private object SpeedEngine {
     private const val SERVERS_URL = "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=1000"
