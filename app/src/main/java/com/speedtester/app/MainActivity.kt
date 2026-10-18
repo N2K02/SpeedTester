@@ -22,6 +22,9 @@ import org.osmdroid.views.overlay.Marker
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import org.osmdroid.tileprovider.MapTileProviderBase
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -591,7 +594,12 @@ private fun SpeedTesterApp(context: Context) {
                                     Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                     val mapped = serversWithDistance.filter { it.latitude != null && it.longitude != null }
                                     if (mapped.isNotEmpty()) {
-                                        ServerMapView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(420.dp))
+                                        ServerMapView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(420.dp), onMapLog = { message ->
+                                            val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
+                                            activityLog.add("MAP $stamp · $message")
+                                            while (activityLog.size > 8) activityLog.removeAt(0)
+                                            logDiagnostic("MAP $message")
+                                        })
                                         Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = Muted, style = MaterialTheme.typography.labelSmall)
                                     } else {
                                         Box(Modifier.fillMaxWidth().height(180.dp).background(Color(0xFF0D151B), RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
@@ -899,7 +907,8 @@ private fun ServerMapView(
     servers: List<NdtServerCandidate>,
     originLat: Double,
     originLon: Double,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMapLog: (String) -> Unit = {}
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapView by remember { mutableStateOf<MapView?>(null) }
@@ -926,8 +935,25 @@ private fun ServerMapView(
                 Configuration.getInstance().userAgentValue =
                     "SpeedTester/4.7 (Android; https://github.com/N2K02/SpeedTester)"
                 // Tile request diagnostics are emitted by osmdroid's provider logger.
+                onMapLog("MapView created; source=OpenStreetMap Standard; zoom=8; center=${originLat},${originLon}")
+                onMapLog("Tile endpoint=https://tile.openstreetmap.org/{z}/{x}/{y}.png; User-Agent=${Configuration.getInstance().userAgentValue}")
+                var tileSuccessCount = 0
+                var tileFailureCount = 0
                 MapView(viewContext).apply {
                     setTileSource(openStreetMapTileSource())
+                    tileProvider.getTileRequestCompleteHandlers().add(Handler(Looper.getMainLooper()) { message ->
+                        when (message.what) {
+                            MapTileProviderBase.MAPTILE_SUCCESS_ID -> {
+                                tileSuccessCount++
+                                if (tileSuccessCount <= 5 || tileSuccessCount % 10 == 0) onMapLog("Tile loaded successfully; total=$tileSuccessCount")
+                            }
+                            MapTileProviderBase.MAPTILE_FAIL_ID -> {
+                                tileFailureCount++
+                                onMapLog("TILE FAILURE reported by osmdroid; failures=$tileFailureCount, successes=$tileSuccessCount. Check Logcat tag osmdroid for request details.")
+                            }
+                        }
+                        true
+                    })
                     setMultiTouchControls(true)
                     setBuiltInZoomControls(false)
                     setUseDataConnection(true)
@@ -954,6 +980,7 @@ private fun ServerMapView(
                         else -> openStreetMapTileSource()
                     }
                     map.setTileSource(source)
+                    onMapLog("Tile style changed to $tileStyle; source=${source.name()}; minZoom=${source.minimumZoomLevel}; maxZoom=${source.maximumZoomLevel}")
                     map.tag = Pair(tileStyle, previousTag?.second as? String ?: "")
                     map.invalidate()
                 }
@@ -1043,6 +1070,7 @@ private fun ServerMapView(
                     tileStyle = "Standard"
                     mapView?.let { map ->
                         map.setTileSource(openStreetMapTileSource())
+                        onMapLog("Manual reload requested; source=OpenStreetMap Standard; cache/network request will be retried as needed")
                         map.invalidate()
                     }
                 },
