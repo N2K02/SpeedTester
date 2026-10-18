@@ -8,23 +8,9 @@ import android.location.Location
 import android.location.LocationManager
 import android.content.ClipboardManager
 import android.provider.Settings
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.util.MapTileIndex
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import org.osmdroid.tileprovider.MapTileProviderBase
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -59,6 +45,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -884,23 +873,8 @@ private object ServerGeoLocator {
     InfoRow("Sender-buffer limited", info.senderLimitedUs?.let { "%.1f s".format(java.util.Locale.US, it / 1_000_000.0) } ?: "—")
 }
 /**
- * Uses the exact HTTPS Z/X/Y URL required by OpenStreetMap's tile policy.
- * Keep the URL isolated here so the source can be changed without touching map controls.
- */
-private fun openStreetMapTileSource() = object : OnlineTileSourceBase(
-    "OpenStreetMap Standard", 0, 19, 256, ".png",
-    arrayOf("https://tile.openstreetmap.org/"),
-    "© OpenStreetMap contributors"
-) {
-    override fun getTileURLString(pMapTileIndex: Long): String =
-        getBaseUrl() + MapTileIndex.getZoom(pMapTileIndex) + "/" +
-            MapTileIndex.getX(pMapTileIndex) + "/" +
-            MapTileIndex.getY(pMapTileIndex) + ".png"
-}
-
-/**
- * Native OpenStreetMap view. Controls are Compose overlays; markers are only rebuilt
- * when the server data or distance origin changes, not on every map gesture/recomposition.
+ * Server map drawn natively in Compose (see OsmMap.kt). Controls are Compose overlays; the camera is
+ * re-framed only when the server data or distance origin changes, not on every recomposition.
  */
 @Composable
 private fun ServerMapView(
@@ -910,144 +884,48 @@ private fun ServerMapView(
     modifier: Modifier = Modifier,
     onMapLog: (String) -> Unit = {}
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var mapView by remember { mutableStateOf<MapView?>(null) }
-    var tileStyle by remember { mutableStateOf("Standard") }
-    val overlayKey = remember(servers, originLat, originLon) {
-        buildString {
-            append(originLat).append(',').append(originLon)
-            servers.forEach { server ->
-                append('|').append(server.serverId).append(':')
-                    .append(server.latitude).append(',').append(server.longitude)
-                    .append(':').append(server.label)
+    val density = LocalDensity.current
+    val tileSize = mapTileSizePx(density.density)
+    val framePadding = with(density) { 56.dp.toPx() }
+    var tileSource by remember { mutableStateOf(MapTileSources.Standard) }
+    var reloadToken by remember { mutableIntStateOf(0) }
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    val camera = remember { MapCameraState(originLat, originLon, 8.0) }
+
+    val markers = remember(servers, originLat, originLon) {
+        buildList {
+            add(MapMarker("origin", originLat, originLon, "Distance reference", "Used to calculate approximate server distances", isOrigin = true))
+            servers.forEachIndexed { index, server ->
+                val lat = server.latitude
+                val lon = server.longitude
+                if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                    val distance = server.distanceKm?.let { String.format(java.util.Locale.US, "%.1f km away", it) } ?: "Distance unavailable"
+                    val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
+                    add(MapMarker(server.serverId.ifBlank { server.host + "#" + index }, lat, lon, server.label, "${server.city}\n$distance · $ping\n${server.host}"))
+                }
             }
+        }
+    }
+    val serverPoints = remember(markers) { markers.filter { !it.isOrigin }.map { it.latitude to it.longitude } }
+
+    // Frame the origin and server pins when data changes (and once the map has a size).
+    LaunchedEffect(markers, viewSize) {
+        if (viewSize.width > 0 && viewSize.height > 0) {
+            camera.fit(markers.map { it.latitude to it.longitude }, viewSize.width, viewSize.height, framePadding, tileSize)
+            onMapLog("Map framed; markers=${markers.size}; zoom=${"%.1f".format(java.util.Locale.US, camera.zoom)}; size=${viewSize.width}x${viewSize.height}")
         }
     }
 
     Box(modifier = modifier) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { viewContext ->
-                val preferences = viewContext.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
-                Configuration.getInstance().load(viewContext, preferences)
-                // Identify the app properly to OpenStreetMap's public tile service.
-                // The service may block generic library/package-only User-Agent strings.
-                Configuration.getInstance().userAgentValue =
-                    "SpeedTester/4.7 (Android; https://github.com/N2K02/SpeedTester)"
-                // Tile request diagnostics are emitted by osmdroid's provider logger.
-                onMapLog("MapView created; source=OpenStreetMap Standard; zoom=8; center=${originLat},${originLon}")
-                onMapLog("Tile endpoint=https://tile.openstreetmap.org/{z}/{x}/{y}.png; User-Agent=${Configuration.getInstance().userAgentValue}")
-                var tileSuccessCount = 0
-                var tileFailureCount = 0
-                MapView(viewContext).apply {
-                    setTileSource(openStreetMapTileSource())
-                    tileProvider.getTileRequestCompleteHandlers().add(Handler(Looper.getMainLooper()) { message ->
-                        when (message.what) {
-                            MapTileProviderBase.MAPTILE_SUCCESS_ID -> {
-                                tileSuccessCount++
-                                if (tileSuccessCount <= 5 || tileSuccessCount % 10 == 0) onMapLog("Tile loaded successfully; total=$tileSuccessCount")
-                            }
-                            MapTileProviderBase.MAPTILE_FAIL_ID -> {
-                                tileFailureCount++
-                                onMapLog("TILE FAILURE reported by osmdroid; failures=$tileFailureCount, successes=$tileSuccessCount. Check Logcat tag osmdroid for request details.")
-                            }
-                        }
-                        true
-                    })
-                    setMultiTouchControls(true)
-                    setBuiltInZoomControls(false)
-                    setUseDataConnection(true)
-                    controller.setZoom(8.0)
-                    controller.setCenter(GeoPoint(originLat, originLon))
-                    tag = Pair("Standard", "")
-                    mapView = this
-                }
-            },
-            update = { map ->
-                val previousTag = map.tag as? Pair<*, *>
-                if (previousTag?.first != tileStyle) {
-                    val source = when (tileStyle) {
-                        "Topographic" -> TileSourceFactory.USGS_TOPO
-                        "Satellite" -> object : OnlineTileSourceBase(
-                            "Esri World Imagery", 0, 19, 256, "",
-                            arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
-                            "Tiles © Esri"
-                        ) {
-                            override fun getTileURLString(pMapTileIndex: Long): String =
-                                getBaseUrl() + MapTileIndex.getZoom(pMapTileIndex) + "/" +
-                                    MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
-                        }
-                        else -> openStreetMapTileSource()
-                    }
-                    map.setTileSource(source)
-                    onMapLog("Tile style changed to $tileStyle; source=${source.name()}; minZoom=${source.minimumZoomLevel}; maxZoom=${source.maximumZoomLevel}")
-                    map.tag = Pair(tileStyle, previousTag?.second as? String ?: "")
-                    map.invalidate()
-                }
-                val currentTag = map.tag as? Pair<*, *>
-                if (currentTag?.second != overlayKey) {
-                    map.overlays.clear()
-                    val origin = GeoPoint(originLat, originLon)
-                    map.overlays.add(Marker(map).apply {
-                        position = origin
-                        title = "Distance reference"
-                        snippet = "Used to calculate approximate server distances"
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    })
-                    servers.forEach { server ->
-                        val lat = server.latitude
-                        val lon = server.longitude
-                        if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
-                            val distance = server.distanceKm?.let {
-                                String.format(java.util.Locale.US, "%.1f km away", it)
-                            } ?: "Distance unavailable"
-                            val ping = server.latencyMs?.let { "$it ms TCP ping" } ?: "TCP ping unavailable"
-                            map.overlays.add(Marker(map).apply {
-                                position = GeoPoint(lat, lon)
-                                title = server.label
-                                snippet = "${server.city}\n$distance · $ping\n${server.host}"
-                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                            })
-                        }
-                    }
-                    map.tag = Pair(tileStyle, overlayKey)
-                    // Frame the origin and server pins when data changes, so pins aren't
-                    // hidden outside the initial viewport.
-                    val framePoints = buildList {
-                        add(origin)
-                        servers.forEach { server ->
-                            val lat = server.latitude
-                            val lon = server.longitude
-                            if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
-                                add(GeoPoint(lat, lon))
-                            }
-                        }
-                    }
-                    if (framePoints.size > 1) {
-                        val north = framePoints.maxOf { it.latitude }
-                        val south = framePoints.minOf { it.latitude }
-                        val east = framePoints.maxOf { it.longitude }
-                        val west = framePoints.minOf { it.longitude }
-                        map.post {
-                            runCatching {
-                                map.zoomToBoundingBox(
-                                    org.osmdroid.util.BoundingBox(north, east, south, west),
-                                    true,
-                                    64
-                                )
-                            }
-                        }
-                    } else {
-                        map.controller.setCenter(origin)
-                        map.controller.setZoom(8.0)
-                    }
-                    map.invalidate()
-                }
-            }
+        OsmTileMap(
+            markers = markers,
+            source = tileSource,
+            camera = camera,
+            modifier = Modifier.fillMaxSize().onSizeChanged { viewSize = it },
+            reloadToken = reloadToken,
+            onMapLog = onMapLog
         )
 
-        // Style and zoom controls remain outside the native map view so they do not
-        // interfere with drag/pinch gestures.
         Row(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .padding(8.dp)
@@ -1056,23 +934,24 @@ private fun ServerMapView(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            listOf("Standard", "Topographic", "Satellite").forEach { style ->
+            MapTileSources.all.forEach { source ->
                 TextButton(
-                    onClick = { tileStyle = style },
+                    onClick = {
+                        if (tileSource != source) {
+                            tileSource = source
+                            onMapLog("Tile style changed to ${source.name}")
+                        }
+                    },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text(style, color = if (tileStyle == style) Teal else Color.White,
+                    Text(source.name, color = if (tileSource == source) Teal else Color.White,
                         style = MaterialTheme.typography.labelMedium)
                 }
             }
             TextButton(
                 onClick = {
-                    tileStyle = "Standard"
-                    mapView?.let { map ->
-                        map.setTileSource(openStreetMapTileSource())
-                        onMapLog("Manual reload requested; source=OpenStreetMap Standard; cache/network request will be retried as needed")
-                        map.invalidate()
-                    }
+                    reloadToken++
+                    onMapLog("Manual reload requested; source=${tileSource.name}")
                 },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
             ) {
@@ -1087,57 +966,21 @@ private fun ServerMapView(
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            TextButton(onClick = { mapView?.controller?.zoomIn() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
+            val center = Offset(viewSize.width / 2f, viewSize.height / 2f)
+            TextButton(onClick = { camera.zoomAround(center, viewSize.width, viewSize.height, tileSize, kotlin.math.floor(camera.zoom) + 1.0) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
                 Text("+", color = Color.White, style = MaterialTheme.typography.titleLarge)
             }
-            TextButton(onClick = { mapView?.controller?.zoomOut() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
+            TextButton(onClick = { camera.zoomAround(center, viewSize.width, viewSize.height, tileSize, kotlin.math.ceil(camera.zoom) - 1.0) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
                 Text("−", color = Color.White, style = MaterialTheme.typography.titleLarge)
             }
-            TextButton(onClick = {
-                mapView?.controller?.animateTo(GeoPoint(originLat, originLon))
-                mapView?.controller?.setZoom(8.0)
-            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+            TextButton(onClick = { camera.moveTo(originLat, originLon, 8.0) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                 Text("Here", color = Teal, style = MaterialTheme.typography.labelMedium)
             }
             TextButton(onClick = {
-                val points = servers.mapNotNull { server ->
-                    val lat = server.latitude
-                    val lon = server.longitude
-                    if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) GeoPoint(lat, lon) else null
-                }
-                if (points.isNotEmpty()) {
-                    val north = points.maxOf { it.latitude }
-                    val south = points.minOf { it.latitude }
-                    val east = points.maxOf { it.longitude }
-                    val west = points.minOf { it.longitude }
-                    mapView?.zoomToBoundingBox(org.osmdroid.util.BoundingBox(north, east, south, west), true, 48)
-                }
+                if (serverPoints.isNotEmpty()) camera.fit(serverPoints, viewSize.width, viewSize.height, framePadding, tileSize)
             }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                 Text("Fit", color = Teal, style = MaterialTheme.typography.labelMedium)
             }
-        }
-    }
-
-    DisposableEffect(lifecycleOwner, mapView) {
-        val currentMapView = mapView
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> currentMapView?.onResume()
-                Lifecycle.Event.ON_PAUSE -> currentMapView?.onPause()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        // AndroidView can be created after Activity ON_RESUME has already fired.
-        // Sync the current state so osmdroid starts its tile requests immediately.
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            currentMapView?.onResume()
-        }
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            currentMapView?.onPause()
-            currentMapView?.onDetach()
-            if (mapView === currentMapView) mapView = null
         }
     }
 }
