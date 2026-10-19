@@ -23,3 +23,14 @@ Release builds are published by GitHub Actions. Configure `SIGNING_KEYSTORE_BASE
 
 ## Test servers
 The default mode uses LibreSpeed-compatible endpoints configured in the app. Public third-party speed-test services do not all provide a stable public API; add a provider only when its endpoint and terms permit automated testing. Speed measurements depend on server capacity and routing.
+
+
+## Official download and project links
+
+Android network diagnostics app for download and upload speed tests, latency, jitter, Wi-Fi signal details, and test history.
+
+- **Latest Android APK:** [Download the latest release](https://github.com/N2K02/SpeedTester/releases/latest)
+- **All releases and version history:** [GitHub Releases](https://github.com/N2K02/SpeedTester/releases)
+- **Source code and issue reporting:** [SpeedTester repository](https://github.com/N2K02/SpeedTester)
+
+The APK is distributed through GitHub Releases. If no release is available, check the repository's Releases page for future published builds. Google indexing is not guaranteed; this section provides clear crawlable links for visitors and search engines.
