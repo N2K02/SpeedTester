@@ -51,6 +51,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -146,6 +148,18 @@ private fun SpeedTesterApp(context: Context) {
     val serverPageCount = maxOf(1, (filteredServers.size + serverPageSize - 1) / serverPageSize)
     val visibleServers = filteredServers.drop(serverPage * serverPageSize).take(serverPageSize)
     LaunchedEffect(filteredServers.size, serverSearch) { serverPage = 0 }
+    // No server to pick by hand each launch: reuse last time's server if it's still listed,
+    // otherwise take the one with the lowest latency (the list is sorted that way).
+    LaunchedEffect(availableServers) {
+        if (selectedServer == null && availableServers.isNotEmpty()) {
+            val savedId = prefs.getString("selected_server_id", null)
+            selectedServer = availableServers.firstOrNull { it.serverId.isNotBlank() && it.serverId == savedId }
+                ?: availableServers.first()
+        }
+    }
+    LaunchedEffect(selectedServer?.serverId) {
+        selectedServer?.serverId?.takeIf { it.isNotBlank() }?.let { prefs.edit().putString("selected_server_id", it).apply() }
+    }
     var testing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready to test") }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -283,7 +297,7 @@ private fun SpeedTesterApp(context: Context) {
                                         }
                                     }, enabled = !serversLoading && !testing) { Text("Refresh") }
                                 }
-                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ordered nearest to your last known location. If location is unavailable, distances use a Mauritius reference point.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ordered nearest to your last known location. The lowest-latency server is picked for you (or the one you used last); tap another to change it.", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search provider, city, server ID") }, placeholder = { Text("e.g. my.t, Emtel, 4342") })
                                 Text("${filteredServers.size} HTTPS-compatible Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding Mauritius Ookla servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
@@ -363,6 +377,8 @@ private fun SpeedTesterApp(context: Context) {
                                      StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", Color(0xFFFFA64D), Modifier.weight(1f))
                                  }
                                  Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                 val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
+                                 if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = Teal, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
@@ -1078,67 +1094,163 @@ private fun requestDeviceLocation(context: Context, onLocation: (Location) -> Un
 private object SpeedEngine {
     private const val SERVERS_URL = "https://www.speedtest.net/api/js/servers?engine=js&https_functional=true&limit=1000"
     private const val TEST_SECONDS = 8L
+    /** Parallel connections per direction. One connection can't fill a fast line (TCP slow start, per-connection limits). */
+    private const val STREAMS = 4
+    /** The first part of each phase is TCP ramp-up; the headline speed is measured after it. */
+    private const val WARMUP_MS = 1500L
     private val discoveryClient = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).callTimeout(5, TimeUnit.SECONDS).build()
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .writeTimeout(12, TimeUnit.SECONDS)
-        .callTimeout(15, TimeUnit.SECONDS)
+        // No overall call timeout: transfers are stopped by the test clock, not by OkHttp.
         .retryOnConnectionFailure(false)
+        // HTTP/1.1 keeps each stream on its own TCP connection (HTTP/2 would share one).
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .build()
 
     suspend fun discoverCandidates(): List<NdtServerCandidate> = withContext(Dispatchers.IO) {
         // Search terms improve coverage, but the local country-code check is authoritative.
         val searches = listOf("Mauritius", "my.t", "Mauritius Telecom", "Emtel", "CHiLi", "4342", "18685", "30612")
-        val found = linkedMapOf<String, NdtServerCandidate>()
-        for (term in searches) {
-            try {
-                val url = SERVERS_URL + "&search=" + java.net.URLEncoder.encode(term, "UTF-8")
-                val jsonText = discoveryClient.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
-                    if (!response.isSuccessful) return@use "[]"
-                    response.body?.string() ?: "[]"
+        // All searches run at once instead of one after another.
+        val pages = kotlinx.coroutines.coroutineScope {
+            searches.map { term ->
+                async {
+                    runCatching {
+                        val url = SERVERS_URL + "&search=" + java.net.URLEncoder.encode(term, "UTF-8")
+                        discoveryClient.newCall(Request.Builder().url(url).header("Accept", "application/json").header("User-Agent", "SpeedTester-Android/1.0").build()).execute().use { response ->
+                            if (!response.isSuccessful) "[]" else response.body?.string() ?: "[]"
+                        }
+                    }.getOrDefault("[]")
                 }
-                val json = JSONArray(jsonText)
-                for (i in 0 until json.length()) {
-                    val item = json.optJSONObject(i) ?: continue
-                    val country = item.optString("cc").uppercase(java.util.Locale.ROOT)
-                    if (country != "MU") continue
-                    if (item.optInt("https_functional", 0) != 1) continue
-                    val rawUrl = item.optString("url")
-                    if (rawUrl.isBlank()) continue
-                    val secureUrl = runCatching {
-                        val u = java.net.URI(rawUrl)
-                        if (u.host.isNullOrBlank()) "" else java.net.URI("https", u.userInfo, u.host, u.port, u.path, u.query, u.fragment).toString()
-                    }.getOrDefault("")
-                    if (!secureUrl.startsWith("https://")) continue
-                    val parsed = runCatching { java.net.URI(secureUrl) }.getOrNull() ?: continue
-                    val hostPort = item.optString("host").ifBlank { parsed.rawAuthority.orEmpty() }
-                    val host = hostPort.substringBeforeLast(":", hostPort).ifBlank { parsed.host.orEmpty() }
-                    val port = hostPort.substringAfterLast(":", "").toIntOrNull() ?: if (parsed.port > 0) parsed.port else 443
-                    val id = item.optString("id")
-                    val key = id.ifBlank { hostPort }
-                    if (found.containsKey(key)) continue
-                    val city = item.optString("name").takeUnless { it == "null" }.orEmpty()
-                    val sponsor = item.optString("sponsor").takeUnless { it == "null" }.orEmpty()
-                    val lat = item.optString("lat").toDoubleOrNull()
-                    val lon = item.optString("lon").toDoubleOrNull()
+            }.awaitAll()
+        }
+        val found = linkedMapOf<String, NdtServerCandidate>()
+        for (jsonText in pages) {
+            val json = runCatching { JSONArray(jsonText) }.getOrNull() ?: continue
+            for (i in 0 until json.length()) {
+                val item = json.optJSONObject(i) ?: continue
+                val country = item.optString("cc").uppercase(java.util.Locale.ROOT)
+                if (country != "MU") continue
+                if (item.optInt("https_functional", 0) != 1) continue
+                val rawUrl = item.optString("url")
+                if (rawUrl.isBlank()) continue
+                val secureUrl = runCatching {
+                    val u = java.net.URI(rawUrl)
+                    if (u.host.isNullOrBlank()) "" else java.net.URI("https", u.userInfo, u.host, u.port, u.path, u.query, u.fragment).toString()
+                }.getOrDefault("")
+                if (!secureUrl.startsWith("https://")) continue
+                val parsed = runCatching { java.net.URI(secureUrl) }.getOrNull() ?: continue
+                val hostPort = item.optString("host").ifBlank { parsed.rawAuthority.orEmpty() }
+                val id = item.optString("id")
+                val key = id.ifBlank { hostPort }
+                if (found.containsKey(key)) continue
+                val city = item.optString("name").takeUnless { it == "null" }.orEmpty()
+                val sponsor = item.optString("sponsor").takeUnless { it == "null" }.orEmpty()
+                val lat = item.optString("lat").toDoubleOrNull()
+                val lon = item.optString("lon").toDoubleOrNull()
+                found[key] = NdtServerCandidate(
+                    hostPort, city, country, "Mauritius", secureUrl, secureUrl,
+                    lat, lon, distanceKmBetween(-20.2, 57.5, lat, lon), null, id, sponsor
+                )
+            }
+        }
+        // Latency to every server, measured in parallel too.
+        val measured = kotlinx.coroutines.coroutineScope {
+            found.values.map { candidate ->
+                async {
+                    val hostPort = candidate.host
+                    val host = hostPort.substringBeforeLast(":", hostPort)
+                    val port = hostPort.substringAfterLast(":", "").toIntOrNull() ?: 443
                     val latency = runCatching {
                         val started = System.nanoTime()
                         Socket().use { it.connect(java.net.InetSocketAddress(host, port), 1800) }
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                     }.getOrNull()
-                    found[key] = NdtServerCandidate(
-                        hostPort, city, country, "Mauritius", secureUrl, secureUrl,
-                        lat, lon, distanceKmBetween(-20.2, 57.5, lat, lon), latency, id, sponsor
-                    )
+                    candidate.copy(latencyMs = latency)
                 }
-            } catch (_: Exception) {
-                // A failed query should not prevent trying other provider/search terms.
-            }
+            }.awaitAll()
         }
-        found.values.filter { it.country == "MU" }
+        measured.filter { it.country == "MU" }
             .sortedWith(compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }.thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.sponsor })
             .take(30)
+    }
+
+    /** Result of one direction: headline (after ramp-up), whole-phase average, peak, bytes and seconds. */
+    private data class Phase(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val seconds: Double)
+
+    /**
+     * Runs [STREAMS] transfers in parallel for [TEST_SECONDS], reporting the combined rate about every
+     * 250 ms. [transfer] performs one request; it adds to the counter as bytes move, and should stop
+     * when the flag is set. Calls still running at the end are cancelled.
+     */
+    private suspend fun runPhase(
+        label: String,
+        progressFrom: Float,
+        progressTo: Float,
+        onUpdate: (String, Float, Float) -> Unit,
+        onLog: (String) -> Unit,
+        transfer: (stop: java.util.concurrent.atomic.AtomicBoolean, counter: java.util.concurrent.atomic.AtomicLong, calls: MutableSet<okhttp3.Call>) -> Unit,
+    ): Phase = kotlinx.coroutines.coroutineScope {
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val bytes = java.util.concurrent.atomic.AtomicLong(0L)
+        val calls: MutableSet<okhttp3.Call> = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
+        val firstError = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val workers = (1..STREAMS).map { stream ->
+            launch(Dispatchers.IO) {
+                var failures = 0
+                while (!stop.get()) {
+                    try {
+                        transfer(stop, bytes, calls)
+                        failures = 0
+                    } catch (e: Exception) {
+                        if (stop.get()) break
+                        firstError.compareAndSet(null, e)
+                        onLog("$label stream $stream: ${e.javaClass.simpleName}: ${e.message ?: "no message"}")
+                        // A stream that keeps failing gives up; the others carry on.
+                        if (++failures >= 3) break
+                        kotlinx.coroutines.delay(300)
+                    }
+                }
+            }
+        }
+        val start = System.nanoTime()
+        val totalNanos = TimeUnit.SECONDS.toNanos(TEST_SECONDS)
+        var lastAt = start
+        var lastBytes = 0L
+        var peak = 0.0
+        var warmupBytes = -1L
+        var warmupAt = 0L
+        while (System.nanoTime() - start < totalNanos) {
+            kotlinx.coroutines.delay(250)
+            val now = System.nanoTime()
+            val total = bytes.get()
+            val instant = (total - lastBytes) * 8.0 / ((now - lastAt) / 1_000_000_000.0) / 1_000_000.0
+            if (warmupBytes < 0 && now - start >= TimeUnit.MILLISECONDS.toNanos(WARMUP_MS)) {
+                warmupBytes = total; warmupAt = now
+            }
+            peak = maxOf(peak, instant)
+            val fraction = ((now - start).toDouble() / totalNanos).toFloat().coerceIn(0f, 1f)
+            onUpdate(label, progressFrom + (progressTo - progressFrom) * fraction, instant.toFloat())
+            lastAt = now; lastBytes = total
+            // Every stream gave up: stop early instead of waiting out the clock.
+            if (workers.all { it.isCompleted }) break
+        }
+        stop.set(true)
+        calls.forEach { it.cancel() }
+        workers.forEach { it.join() }
+        val end = System.nanoTime()
+        val total = bytes.get()
+        if (total <= 0L) {
+            val cause = firstError.get()
+            error("$label: the server sent no data" + (cause?.let { " (${it.message ?: it.javaClass.simpleName})" } ?: ""))
+        }
+        val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
+        val average = total * 8.0 / seconds / 1_000_000.0
+        val steady = if (warmupBytes >= 0 && end > warmupAt) {
+            (total - warmupBytes) * 8.0 / ((end - warmupAt) / 1_000_000_000.0) / 1_000_000.0
+        } else average
+        Phase(steady, average, maxOf(peak, steady), total, seconds)
     }
 
     suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
@@ -1159,7 +1271,7 @@ private object SpeedEngine {
         val host = uploadUri.host ?: error("The selected Ookla server URL is invalid")
         val port = if (uploadUri.port > 0) uploadUri.port else 443
         val locationName = listOf(server.sponsor, server.city, server.countryName).filter { it.isNotBlank() }.joinToString(" · ")
-        onLog("Engine: Ookla-compatible HTTPS transfer test")
+        onLog("Engine: Ookla-compatible HTTPS transfer test, $STREAMS parallel connections per direction")
         onLog("Discovery: Speedtest.net public server directory")
         onLog("Country filter: MU (enforced locally)")
         onLog("Selected server ID: " + server.serverId)
@@ -1186,83 +1298,66 @@ private object SpeedEngine {
         val ping = pings.average().toLong()
         val jitter = pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
 
-        // Ookla-compatible download endpoint; only HTTPS-capable servers are selected.
-        // Ookla classic servers expose random-size JPEG payloads beside upload.php.
-        // Request the standard transfer path instead of a generic /download URL.
-        val downloadUrl = java.net.URI(uploadEndpoint).let { u ->
-            val directory = u.path.substringBeforeLast("/", "")
-            java.net.URI(u.scheme, u.userInfo, u.host, u.port, directory + "/random4000x4000.jpg", "nocache=" + System.nanoTime(), null).toString()
-        }
-        onLog("Download endpoint: " + downloadUrl)
+        // Ookla classic servers expose random-size JPEG payloads beside upload.php. Each stream
+        // requests it again whenever it finishes, until the time is up.
+        val downloadBase = java.net.URI(uploadEndpoint).let { u -> u.path.substringBeforeLast("/", "") + "/random4000x4000.jpg" }
+        onLog("Download endpoint: " + java.net.URI(uploadUri.scheme, null, uploadUri.host, uploadUri.port, downloadBase, null, null))
         onUpdate("Downloading · Ookla server", .08f, 0f)
-        val downStart = System.nanoTime()
-        var downBytes = 0L
-        var downLastAt = downStart
-        var downLastBytes = 0L
-        var downPeak = 0.0
-        val downCall = client.newCall(Request.Builder().url(downloadUrl).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
-        val downResponse = kotlinx.coroutines.withTimeout(12_000L) { withContext(Dispatchers.IO) { downCall.execute() } }
-        downResponse.use { response ->
-            if (!response.isSuccessful) error("Ookla download endpoint returned HTTP " + response.code + ". This server may not support the compatible transfer endpoint.")
-            val body = response.body ?: error("Ookla download endpoint returned an empty response")
-            body.byteStream().use { input ->
-                val buffer = ByteArray(64 * 1024)
-                while ((System.nanoTime() - downStart) < TimeUnit.SECONDS.toNanos(TEST_SECONDS)) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    downBytes += count
-                    val now = System.nanoTime()
-                    val elapsed = (now - downStart) / 1_000_000_000.0
-                    if (now - downLastAt >= 250_000_000L) {
-                        val instant = (downBytes - downLastBytes) * 8.0 / ((now - downLastAt) / 1_000_000_000.0) / 1_000_000.0
-                        downPeak = maxOf(downPeak, instant)
-                        onUpdate("Downloading · Ookla server", (.08f + .42f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.08f, .50f), instant.toFloat())
-                        downLastAt = now; downLastBytes = downBytes
+        val down = runPhase("Downloading · Ookla server", .08f, .50f, onUpdate, onLog) { stop, counter, calls ->
+            val url = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, downloadBase, "nocache=" + System.nanoTime(), null).toString()
+            val call = client.newCall(Request.Builder().url(url).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
+            calls.add(call)
+            try {
+                call.execute().use { response ->
+                    if (!response.isSuccessful) error("Ookla download endpoint returned HTTP " + response.code + ". This server may not support the compatible transfer endpoint.")
+                    val body = response.body ?: error("Ookla download endpoint returned an empty response")
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (!stop.get()) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            counter.addAndGet(count.toLong())
+                        }
+                    }
+                }
+            } finally {
+                calls.remove(call)
+            }
+        }
+        onLog("DOWNLOAD: bytes=${down.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, down.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, down.averageMbps) + " Mbps")
+
+        onUpdate("Uploading · Ookla server", .55f, 0f)
+        val payload = ByteArray(1024 * 1024).also { java.security.SecureRandom().nextBytes(it) }
+        val up = runPhase("Uploading · Ookla server", .55f, .95f, onUpdate, onLog) { stop, counter, calls ->
+            val nonce = java.util.UUID.randomUUID().toString()
+            val requestUrl = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, uploadUri.path, "nocache=$nonce", null).toString()
+            // 4 MB per request, counted as it is written so partial requests at the end still count.
+            val body = object : okhttp3.RequestBody() {
+                override fun contentType() = "application/octet-stream".toMediaType()
+                override fun contentLength() = 4L * payload.size
+                override fun writeTo(sink: okio.BufferedSink) {
+                    repeat(4) {
+                        var offset = 0
+                        while (offset < payload.size) {
+                            if (stop.get()) throw java.io.IOException("Test time is up")
+                            val n = minOf(64 * 1024, payload.size - offset)
+                            sink.write(payload, offset, n)
+                            sink.flush()
+                            counter.addAndGet(n.toLong())
+                            offset += n
+                        }
                     }
                 }
             }
-        }
-        val downElapsed = ((System.nanoTime() - downStart) / 1_000_000_000.0).coerceAtLeast(.001)
-        val downMbps = downBytes * 8.0 / downElapsed / 1_000_000.0
-        if (downBytes <= 0L) error("The selected server returned no download data")
-        onLog("DOWNLOAD: bytes=$downBytes, elapsed=" + "%.2f".format(java.util.Locale.US, downElapsed) + "s, average=" + "%.2f".format(java.util.Locale.US, downMbps) + " Mbps")
-        val down = NdtMeasurement(downMbps, downMbps, maxOf(downPeak, downMbps), downBytes, downElapsed, null)
-
-        onUpdate("Uploading · Ookla server", .55f, 0f)
-        val uploadBytes = ByteArray(4 * 1024 * 1024).also { java.security.SecureRandom().nextBytes(it) }
-        var totalUpBytes = 0L
-        val upStart = System.nanoTime()
-        var upPeak = 0.0
-        var upLastAt = upStart
-        var upLastBytes = 0L
-        while ((System.nanoTime() - upStart) < TimeUnit.SECONDS.toNanos(TEST_SECONDS)) {
-            val nonce = java.util.UUID.randomUUID().toString()
-            val requestUrl = java.net.URI(uploadEndpoint).let { u ->
-                java.net.URI(u.scheme, u.userInfo, u.host, u.port, u.path, "nocache=$nonce", null).toString()
-            }
-            val body = object : okhttp3.RequestBody() {
-                override fun contentType() = "application/octet-stream".toMediaType()
-                override fun contentLength() = uploadBytes.size.toLong()
-                override fun writeTo(sink: okio.BufferedSink) { sink.write(uploadBytes) }
-            }
-            val request = Request.Builder().url(requestUrl).post(body).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build()
-            val response = client.newCall(request).execute()
-            response.use { if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code) }
-            totalUpBytes += uploadBytes.size
-            val now = System.nanoTime()
-            val elapsed = (now - upStart) / 1_000_000_000.0
-            if (now - upLastAt >= 250_000_000L) {
-                val instant = (totalUpBytes - upLastBytes) * 8.0 / ((now - upLastAt) / 1_000_000_000.0) / 1_000_000.0
-                upPeak = maxOf(upPeak, instant)
-                onUpdate("Uploading · Ookla server", (.55f + .40f * (elapsed / TEST_SECONDS).toFloat()).coerceIn(.55f, .95f), instant.toFloat())
-                upLastAt = now; upLastBytes = totalUpBytes
+            val call = client.newCall(Request.Builder().url(requestUrl).post(body).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
+            calls.add(call)
+            try {
+                call.execute().use { if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code) }
+            } finally {
+                calls.remove(call)
             }
         }
-        val upElapsed = ((System.nanoTime() - upStart) / 1_000_000_000.0).coerceAtLeast(.001)
-        val upMbps = totalUpBytes * 8.0 / upElapsed / 1_000_000.0
-        if (totalUpBytes <= 0L) error("The selected server accepted no upload data")
-        onLog("UPLOAD: bytes=$totalUpBytes, elapsed=" + "%.2f".format(java.util.Locale.US, upElapsed) + "s, average=" + "%.2f".format(java.util.Locale.US, upMbps) + " Mbps")
-        val up = NdtMeasurement(upMbps, upMbps, maxOf(upPeak, upMbps), totalUpBytes, upElapsed, null)
+        onLog("UPLOAD: bytes=${up.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, up.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, up.averageMbps) + " Mbps")
 
         onUpdate("Checking connection stability", .96f, 0f)
         val loaded = mutableListOf<Long>()
@@ -1282,9 +1377,11 @@ private object SpeedEngine {
         SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, null, null, resolvedAddress, dnsLookupMs)
     }
 }
-private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String, val diagnostics: String = "")
+private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String, val diagnostics: String = "", val sha256: String? = null, val size: Long = -1L)
 private object UpdateChecker {
     private const val API = "https://api.github.com/repos/N2K02/SpeedTester/releases/latest"
+    /** The release found by the last check, so the download can be verified against it. */
+    @Volatile private var lastRelease: ReleaseInfo? = null
     fun getRelease(context: Context): ReleaseInfo = try {
         val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
         val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "SpeedTester-Android").build()
@@ -1297,15 +1394,25 @@ private object UpdateChecker {
         val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
         val notes = json.optString("body").ifBlank { "No release notes were provided." }
         var apkUrl = ""
+        var sha256: String? = null
+        var size = -1L
         val assets = json.optJSONArray("assets")
-        if (assets != null) for (i in 0 until assets.length()) { val asset = assets.getJSONObject(i); if (asset.optString("name").endsWith(".apk", true)) { apkUrl = asset.optString("browser_download_url"); break } }
+        if (assets != null) for (i in 0 until assets.length()) {
+            val asset = assets.getJSONObject(i)
+            if (asset.optString("name").endsWith(".apk", true)) {
+                apkUrl = asset.optString("browser_download_url")
+                sha256 = asset.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:")?.lowercase()
+                size = asset.optLong("size", -1L)
+                break
+            }
+        }
         val available = compareVersions(tag, current) > 0 && apkUrl.isNotBlank()
         val message = when {
             compareVersions(tag, current) <= 0 -> "You're up to date."
             apkUrl.isBlank() -> "A newer release exists, but no APK is attached yet."
             else -> "A new version is available."
         }
-        ReleaseInfo(tag, notes, apkUrl, available, message)
+        ReleaseInfo(tag, notes, apkUrl, available, message, sha256 = sha256, size = size).also { lastRelease = it }
     } catch (e: Exception) {
         val report = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: Release check\nRelease API URL: " + API + "\nException: " + e.javaClass.name + "\nMessage: " + (e.message ?: "No exception message")
         ReleaseInfo("", "", "", false, "Update check failed. Tap Show details for diagnostics.", report)
@@ -1344,11 +1451,49 @@ private object UpdateChecker {
             }
             if (totalBytes > 0L && downloadedBytes != totalBytes) error("APK download incomplete: received $downloadedBytes of $totalBytes bytes")
         }
+        verifyApk(context, apkFile, lastRelease?.takeIf { it.apkUrl == apkUrl })?.let { problem ->
+            apkFile.delete()
+            error(problem)
+        }
         val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
         val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(install)
-        "APK downloaded. Android's installer is ready."
+        "APK downloaded and verified. Android's installer is ready."
         } catch (e: Exception) { "Update failed: " + (e.message ?: "network error") }
+    }
+
+    /**
+     * Null when the APK is safe to hand to the installer, else what's wrong: same size and SHA-256 as
+     * GitHub lists, same app, a newer version, and signed with the key the installed app trusts.
+     */
+    @Suppress("DEPRECATION")
+    private fun verifyApk(context: Context, file: File, release: ReleaseInfo?): String? {
+        if (release != null && release.size > 0 && file.length() != release.size) return "The download was incomplete. Please try again."
+        release?.sha256?.let { expected ->
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+            }
+            val actual = md.digest().joinToString("") { "%02x".format(it) }
+            if (actual != expected) return "The download is damaged (checksum mismatch). Please try again."
+        }
+        val pm = context.packageManager
+        val flags = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+        val apk = pm.getPackageArchiveInfo(file.path, flags) ?: return "The downloaded file isn't a valid app."
+        val mine = pm.getPackageInfo(context.packageName, flags)
+        if (apk.packageName != context.packageName) return "The downloaded file is a different app."
+        if (apk.longVersionCode <= mine.longVersionCode) return "The downloaded version isn't newer than this one."
+        fun signers(info: android.content.pm.PackageInfo): Set<String> {
+            val s = info.signingInfo ?: return emptySet()
+            val sigs = if (s.hasMultipleSigners()) s.apkContentsSigners else s.signingCertificateHistory
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            return sigs.orEmpty().map { sig -> md.digest(sig.toByteArray()).joinToString("") { "%02x".format(it) } }.toSet()
+        }
+        val a = signers(mine)
+        val b = signers(apk)
+        if (a.isNotEmpty() && b.isNotEmpty() && a.intersect(b).isEmpty()) return "This update is signed with a different key, so Android can't install it over the current app."
+        return null
     }
     private fun compareVersions(a: String, b: String): Int {
         val x = a.split(".").map { it.toIntOrNull() ?: 0 }; val y = b.split(".").map { it.toIntOrNull() ?: 0 }
