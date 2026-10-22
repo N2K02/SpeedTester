@@ -3,6 +3,9 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       version:
@@ -14,7 +17,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: ${{ github.event_name == 'pull_request' && format('experiment-pr-{0}', github.event.pull_request.number) || 'release' }}
   cancel-in-progress: false
 
 env:
@@ -22,6 +25,7 @@ env:
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -52,6 +56,12 @@ jobs:
             ver="$(( n / 10 )).$(( n % 10 ))"
           fi
           echo "VERSION=$ver" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$(( 100000 + GITHUB_RUN_NUMBER ))" >> "$GITHUB_ENV"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "VERSION_SUFFIX=-experimental.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          else
+            echo "VERSION_SUFFIX=" >> "$GITHUB_ENV"
+          fi
           prev="$last"
           [ -n "$prev" ] || prev=$(git tag -l 'build-*' | sort -V | tail -1 || true)
           if [ -n "$prev" ]; then range="$prev..HEAD"; else range="HEAD"; fi
@@ -71,10 +81,10 @@ jobs:
           cat release-notes.md
 
       - name: Compile and test
-        run: gradle --no-daemon testDebugUnitTest assembleDebug -PappVersion="$VERSION"
+        run: gradle --no-daemon testDebugUnitTest assembleDebug -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
       - name: Build release APK
-        run: gradle --no-daemon assembleRelease -PappVersion="$VERSION"
+        run: gradle --no-daemon assembleRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
       - name: Sign APK using MRadio signing pipeline
         env:
@@ -106,6 +116,7 @@ jobs:
           path: ${{ env.APP }}-${{ env.VERSION }}.apk
 
       - name: Publish APK as a release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
@@ -115,9 +126,24 @@ jobs:
           files: ${{ env.APP }}-${{ env.VERSION }}.apk
           make_latest: true
 
-      - name: Publish stable APK to public website
+      - name: Publish signed experimental APK to source PR release
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          TAG="experimental-pr-$PR_NUMBER-run-$GITHUB_RUN_NUMBER"
+          gh release create "$TAG" "$APP-$VERSION.apk" \
+            --repo "$GITHUB_REPOSITORY" --target "$PR_HEAD_SHA" \
+            --title "$APP experimental · PR #$PR_NUMBER · build $GITHUB_RUN_NUMBER" \
+            --notes-file release-notes.md --prerelease --latest=false
+
+      - name: Publish stable or experimental APK to public website
         env:
           GH_TOKEN: ${{ secrets.MRADIO_DISTRIBUTION_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning::Set MRADIO_DISTRIBUTION_TOKEN before public publishing is enabled."
