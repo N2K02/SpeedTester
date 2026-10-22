@@ -1385,7 +1385,28 @@ private object UpdateChecker {
     fun getRelease(context: Context): ReleaseInfo = try {
         val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
         val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "SpeedTester-Android").build()
-        val json = client.newCall(request).execute().use { r ->
+        // Prefer a public manifest so updates keep working with a private source repo.
+        val manifest = runCatching {
+            val req = Request.Builder().url("https://n2k02.github.io/speedtester/updates/stable.json").build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) error("No stable manifest")
+                JSONObject(response.body?.string().orEmpty())
+            }
+        }.getOrNull()
+        val json = if (manifest != null &&
+            manifest.optString("apkUrl").startsWith("https://") &&
+            Regex("[a-f0-9]{64}").matches(manifest.optString("sha256").lowercase())) {
+            JSONObject()
+                .put("tag_name", "v" + manifest.optString("versionName"))
+                .put("body", manifest.optJSONArray("notes")?.let { notes ->
+                    (0 until notes.length()).joinToString("\\n") { "- " + notes.optString(it) }
+                } ?: "")
+                .put("assets", JSONArray().put(JSONObject()
+                    .put("name", manifest.optString("apkName"))
+                    .put("browser_download_url", manifest.optString("apkUrl"))
+                    .put("size", manifest.optLong("apkSize"))
+                    .put("digest", "sha256:" + manifest.optString("sha256"))))
+        } else client.newCall(request).execute().use { r ->
             val body = r.body?.string().orEmpty()
             if (!r.isSuccessful) error("GitHub Releases API returned HTTP " + r.code + " at " + r.request.url + "\nResponse body: " + body.take(2000))
             JSONObject(body.ifBlank { "{}" })
