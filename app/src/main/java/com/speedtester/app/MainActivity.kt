@@ -10,6 +10,7 @@ import android.content.ClipboardManager
 import android.provider.Settings
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -1454,7 +1455,10 @@ private object UpdateChecker {
                 break
             }
         }
-        val installedCode = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
+        val installedInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        @Suppress("DEPRECATION")
+        val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) installedInfo.longVersionCode
+            else installedInfo.versionCode.toLong()
         val isNewer = if (manifest != null) manifest.optLong("versionCode") > installedCode
             else compareVersions(tag, current) > 0
         val available = isNewer && apkUrl.isNotBlank()
