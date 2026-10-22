@@ -15,8 +15,8 @@ android {
         applicationId = "com.speedtester.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = appVersionCode
-        versionName = appVersion
+        versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: appVersionCode
+        versionName = appVersion + ((findProperty("appVersionSuffix") as String?) ?: "")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {

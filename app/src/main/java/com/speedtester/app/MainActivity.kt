@@ -10,6 +10,7 @@ import android.content.ClipboardManager
 import android.provider.Settings
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -177,6 +178,9 @@ private fun SpeedTesterApp(context: Context) {
     var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
+    var experimentalEnabled by remember {
+        mutableStateOf(prefs.getBoolean("experimentalEnabled", false))
+    }
     var updateMessage by remember { mutableStateOf("Tap Check for updates to see the latest release.") }
     var updateDiagnostics by remember { mutableStateOf("") }
     var updateDiagnosticsVisible by remember { mutableStateOf(false) }
@@ -648,6 +652,21 @@ private fun SpeedTesterApp(context: Context) {
                                     Text("SpeedTester", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                                     Text("Installed version ${BuildConfig.VERSION_NAME}", color = Muted, style = MaterialTheme.typography.bodySmall)
                                 }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Experimental updates", style = MaterialTheme.typography.titleSmall)
+                                    Text("Opt in to preview APKs; stable is the default.", color = Muted,
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(checked = experimentalEnabled, onCheckedChange = { enabled ->
+                                    experimentalEnabled = enabled
+                                    prefs.edit().putBoolean("experimentalEnabled", enabled).apply()
+                                    updateVersion = ""
+                                    updateAvailable = false
+                                    updateUrl = ""
+                                    updateMessage = "Channel changed. Check for updates."
+                                })
                             }
                             if (updateVersion.isNotBlank()) {
                                 HorizontalDivider(color = Color(0xFF26343E))
@@ -1386,13 +1405,22 @@ private object UpdateChecker {
         val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
         val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "SpeedTester-Android").build()
         // Prefer a public manifest so updates keep working with a private source repo.
-        val manifest = runCatching {
-            val req = Request.Builder().url("https://n2k02.github.io/speedtester/updates/stable.json").build()
+        fun fetchManifest(channel: String): JSONObject? = runCatching {
+            val req = Request.Builder().url("https://n2k02.github.io/speedtester/updates/$channel.json").build()
             client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) error("No stable manifest")
+                if (!response.isSuccessful) error("No $channel manifest")
                 JSONObject(response.body?.string().orEmpty())
             }
-        }.getOrNull()
+        }.getOrNull()?.takeIf { candidate ->
+            candidate.optString("channel") == channel &&
+                candidate.optLong("versionCode") > 0 &&
+                candidate.optString("apkUrl").startsWith("https://github.com/") &&
+                Regex("[a-f0-9]{64}").matches(candidate.optString("sha256").lowercase())
+        }
+        val stable = fetchManifest("stable")
+        val experimental = if (context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)
+                .getBoolean("experimentalEnabled", false)) fetchManifest("experimental") else null
+        val manifest = listOfNotNull(stable, experimental).maxByOrNull { it.optLong("versionCode") }
         val json = if (manifest != null &&
             manifest.optString("apkUrl").startsWith("https://") &&
             Regex("[a-f0-9]{64}").matches(manifest.optString("sha256").lowercase())) {
@@ -1427,9 +1455,15 @@ private object UpdateChecker {
                 break
             }
         }
-        val available = compareVersions(tag, current) > 0 && apkUrl.isNotBlank()
+        val installedInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        @Suppress("DEPRECATION")
+        val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) installedInfo.longVersionCode
+            else installedInfo.versionCode.toLong()
+        val isNewer = if (manifest != null) manifest.optLong("versionCode") > installedCode
+            else compareVersions(tag, current) > 0
+        val available = isNewer && apkUrl.isNotBlank()
         val message = when {
-            compareVersions(tag, current) <= 0 -> "You're up to date."
+            !isNewer -> "You're up to date."
             apkUrl.isBlank() -> "A newer release exists, but no APK is attached yet."
             else -> "A new version is available."
         }
