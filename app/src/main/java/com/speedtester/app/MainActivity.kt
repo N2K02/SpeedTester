@@ -669,7 +669,6 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                     item { HorizontalDivider() }
-                    item { Text("App updates", style = MaterialTheme.typography.titleLarge) }
                     item {
                         dev.n2k02.updater.N2K02UpdateScreen(
                             controller = LiveUpdater.controller,
