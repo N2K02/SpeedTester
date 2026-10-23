@@ -300,7 +300,7 @@ private fun SpeedTesterApp(context: Context) {
                                         onClick = { if (!testing) selectedServer = candidate },
                                         enabled = !testing,
                                         colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
-                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Teal) else null
+                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
                                     ) {
                                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                             RadioButton(selected = isSelected, onClick = { if (!testing) selectedServer = candidate }, enabled = !testing)
@@ -311,7 +311,7 @@ private fun SpeedTesterApp(context: Context) {
                                                 Text("Distance: ${candidate.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                                 Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                             }
-                                            if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = Teal)
+                                            if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = MaterialTheme.colorScheme.primary)
                                         }
                                     }
                                 }
@@ -322,7 +322,7 @@ private fun SpeedTesterApp(context: Context) {
                                         TextButton(onClick = { serverPage = (serverPage + 1).coerceAtMost(serverPageCount - 1) }, enabled = serverPage < serverPageCount - 1) { Text("Next") }
                                     }
                                 }
-                                Text(if (selectedServer == null) "Select a server to enable the speed test." else "Selected: ${selectedServer?.label}", color = if (selectedServer == null) MaterialTheme.colorScheme.onSurfaceVariant else Teal, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                Text(if (selectedServer == null) "Select a server to enable the speed test." else "Selected: ${selectedServer?.label}", color = if (selectedServer == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -368,7 +368,7 @@ private fun SpeedTesterApp(context: Context) {
                                  }
                                  Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                  val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
-                                 if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = Teal, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                 if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.height(18.dp))
                                 Button(onClick = {
                                     if (!testing) {
@@ -419,7 +419,7 @@ private fun SpeedTesterApp(context: Context) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Timeline, null, tint = Teal); Spacer(Modifier.width(8.dp)); Text("Latest activity", fontWeight = FontWeight.SemiBold) }
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Timeline, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(8.dp)); Text("Latest activity", fontWeight = FontWeight.SemiBold) }
                                 Spacer(Modifier.height(8.dp))
                                 Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                     activityLog.takeLast(8).forEach { line -> Text("• " + line, color = if (line.startsWith("ERROR")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
@@ -453,14 +453,14 @@ private fun SpeedTesterApp(context: Context) {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Timeline, null, tint = Teal)
+                                    Icon(Icons.Default.Timeline, null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text("Detailed diagnostic log", fontWeight = FontWeight.SemiBold)
                                         Text("${diagnosticLog.size} entries · keeps latest 500 · shows latest 30", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                     }
                                     IconButton(onClick = { diagnosticLogExpanded = !diagnosticLogExpanded }) {
-                                        Icon(if (diagnosticLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (diagnosticLogExpanded) "Collapse diagnostic log" else "Expand diagnostic log", tint = Teal)
+                                        Icon(if (diagnosticLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (diagnosticLogExpanded) "Collapse diagnostic log" else "Expand diagnostic log", tint = MaterialTheme.colorScheme.primary)
                                     }
                                 }
                                 if (diagnosticLogExpanded) {
@@ -537,7 +537,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Text(item.server.ifBlank { "Server details unavailable" }, style = MaterialTheme.typography.bodySmall)
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.NetworkCheck, null, tint = Teal, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.NetworkCheck, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text("CONNECTION DETAILS", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                                 }
@@ -574,7 +574,7 @@ private fun SpeedTesterApp(context: Context) {
                         item {
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                                 Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    if (serversLoading || serverDiscoveryMs < 0L) CircularProgressIndicator(color = Teal)
+                                    if (serversLoading || serverDiscoveryMs < 0L) CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                     Text(
                                         when {
                                             serversLoading || serverDiscoveryMs < 0L -> "Server map is disabled until discovery finishes."
@@ -614,12 +614,12 @@ private fun SpeedTesterApp(context: Context) {
                                     Text("Servers · nearest first", fontWeight = FontWeight.Bold)
                                     serversWithDistance.forEachIndexed { index, server ->
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("${index + 1}.", color = Teal, fontWeight = FontWeight.Bold)
+                                            Text("${index + 1}.", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                             Column(Modifier.weight(1f)) {
                                                 Text(server.label, fontWeight = FontWeight.SemiBold)
                                                 Text(server.city.ifBlank { server.host }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                             }
-                                            Text(server.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "— km", color = Teal, style = MaterialTheme.typography.labelMedium)
+                                            Text(server.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "— km", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                                         }
                                         if (index < serversWithDistance.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     }
@@ -892,7 +892,7 @@ private fun ServerMapView(
                     },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text(source.name, color = if (tileSource == source) Teal else MaterialTheme.colorScheme.onSurface,
+                    Text(source.name, color = if (tileSource == source) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.labelMedium)
                 }
             }
@@ -903,7 +903,7 @@ private fun ServerMapView(
                 },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
             ) {
-                Text("Reload", color = Teal, style = MaterialTheme.typography.labelMedium)
+                Text("Reload", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
         }
 
@@ -922,12 +922,12 @@ private fun ServerMapView(
                 Text("−", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
             }
             TextButton(onClick = { camera.moveTo(originLat, originLon, if (userLocated) USER_LOCATION_ZOOM else 9.0) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-                Text("Here", color = Teal, style = MaterialTheme.typography.labelMedium)
+                Text("Here", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
             TextButton(onClick = {
                 if (serverPoints.isNotEmpty()) camera.fit(serverPoints, viewSize.width, viewSize.height, framePadding, tileSize)
             }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-                Text("Fit", color = Teal, style = MaterialTheme.typography.labelMedium)
+                Text("Fit", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
         }
     }
