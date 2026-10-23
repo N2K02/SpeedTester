@@ -84,8 +84,6 @@ private fun formatHistoryDate(raw: String): String {
     }
 }
 
-private val Teal = Color(0xFF13B8A6)
-private val Muted = Color(0xFF8A9AA5)
 data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0, val networkType: String = "Unknown", val internetAvailable: Boolean = false, val wifiSignal: String = "—", val wifiQuality: String = "—", val wifiLink: String = "—", val wifiFrequency: String = "—", val connectionNote: String = "", val discoveryStatus: String = "Not recorded", val discoveryMs: Long = -1L)
 
 class MainActivity : ComponentActivity() {
@@ -228,12 +226,12 @@ private fun SpeedTesterApp(context: Context) {
     N2K02Theme {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = Muted) } },
+                TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
                     actions = {},
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0B1117)))
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
             },
             bottomBar = {
-                NavigationBar(containerColor = Color(0xFF101820)) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
                     NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
                     NavigationBarItem(
@@ -257,17 +255,17 @@ private fun SpeedTesterApp(context: Context) {
                         label = { Text("Update") }
                     )
                 }
-            }, containerColor = Color(0xFF0B1117)
+            }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(22.dp)) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("MAURITIUS TEST SERVERS", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                        Text("Ookla directory · Mauritius only · lowest latency first", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        Text("MAURITIUS TEST SERVERS", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Text("Ookla directory · Mauritius only · lowest latency first", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     }
                                     TextButton(onClick = {
                                         scope.launch {
@@ -290,29 +288,28 @@ private fun SpeedTesterApp(context: Context) {
                                         }
                                     }, enabled = !serversLoading && !testing) { Text("Refresh") }
                                 }
-                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ordered nearest to your last known location. The lowest-latency server is picked for you (or the one you used last); tap another to change it.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ordered nearest to your last known location. The lowest-latency server is picked for you (or the one you used last); tap another to change it.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search provider, city, server ID") }, placeholder = { Text("e.g. my.t, Emtel, 4342") })
-                                Text("${filteredServers.size} HTTPS-compatible Mauritius server(s) found", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding Mauritius Ookla servers…", color = Muted, style = MaterialTheme.typography.bodySmall) }
-                                if (serversError.isNotBlank()) Text(serversError, color = Color(0xFFFFA64D), style = MaterialTheme.typography.bodySmall)
-                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible Mauritius servers found. Overseas servers are excluded. Check your connection and refresh the server list.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("${filteredServers.size} HTTPS-compatible Mauritius server(s) found", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding Mauritius Ookla servers…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+                                if (serversError.isNotBlank()) Text(serversError, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
+                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible Mauritius servers found. Overseas servers are excluded. Check your connection and refresh the server list.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 visibleServers.forEach { candidate ->
                                     val isSelected = selectedServer?.host == candidate.host
                                     Card(
                                         onClick = { if (!testing) selectedServer = candidate },
                                         enabled = !testing,
-                                        colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF173B3B) else Color(0xFF0D151C)),
-                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Teal) else null,
-                                        shape = RoundedCornerShape(16.dp)
+                                        colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
+                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Teal) else null
                                     ) {
                                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                             RadioButton(selected = isSelected, onClick = { if (!testing) selectedServer = candidate }, enabled = !testing)
                                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                                Text(candidate.label, color = Color.White, fontWeight = FontWeight.SemiBold)
-                                                Text(candidate.host, color = Muted, style = MaterialTheme.typography.labelSmall)
-                                                Text(listOf(candidate.city, candidate.countryName).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Location not provided" }, color = Muted, style = MaterialTheme.typography.bodySmall)
-                                                Text("Distance: ${candidate.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                                Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                                Text(candidate.label, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                                Text(candidate.host, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                                Text(listOf(candidate.city, candidate.countryName).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Location not provided" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                                Text("Distance: ${candidate.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                                Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                             }
                                             if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = Teal)
                                         }
@@ -321,55 +318,55 @@ private fun SpeedTesterApp(context: Context) {
                                 if (serverPageCount > 1) {
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                         TextButton(onClick = { serverPage = (serverPage - 1).coerceAtLeast(0) }, enabled = serverPage > 0) { Text("Previous") }
-                                        Text("Page ${serverPage + 1} of ${serverPageCount}", color = Muted, style = MaterialTheme.typography.labelMedium)
+                                        Text("Page ${serverPage + 1} of ${serverPageCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                                         TextButton(onClick = { serverPage = (serverPage + 1).coerceAtMost(serverPageCount - 1) }, enabled = serverPage < serverPageCount - 1) { Text("Next") }
                                     }
                                 }
-                                Text(if (selectedServer == null) "Select a server to enable the speed test." else "Selected: ${selectedServer?.label}", color = if (selectedServer == null) Muted else Teal, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                Text(if (selectedServer == null) "Select a server to enable the speed test." else "Selected: ${selectedServer?.label}", color = if (selectedServer == null) MaterialTheme.colorScheme.onSurfaceVariant else Teal, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(24.dp)) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(status, color = Muted, style = MaterialTheme.typography.labelLarge)
+                                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
                                 Spacer(Modifier.height(8.dp))
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White); Text("↓ DOWNLOAD", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White); Text("↑ UPLOAD", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelMedium); Text("Mbps", color = Muted, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(if (livePing >= 0) livePing.toString() else if (ping >= 0) ping.toString() else "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("PING", color = Muted, style = MaterialTheme.typography.labelMedium); Text("ms", color = Muted, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", liveJitter.takeIf { it > 0 } ?: jitter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White); Text("JITTER", color = Muted, style = MaterialTheme.typography.labelMedium); Text("ms", color = Muted, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("↓ DOWNLOAD", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium); Text("Mbps", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("↑ UPLOAD", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium); Text("Mbps", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(if (livePing >= 0) livePing.toString() else if (ping >= 0) ping.toString() else "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("PING", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium); Text("ms", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
+                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", liveJitter.takeIf { it > 0 } ?: jitter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("JITTER", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium); Text("ms", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 val chartMax = max(10f, (downloadSamples + uploadSamples).maxOrNull() ?: 10f)
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Column(Modifier.height(170.dp).width(34.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-                                        Text("${chartMax.toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .75f).toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .5f).toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .25f).toInt()}", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                        Text("0", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${chartMax.toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                        Text("${(chartMax * .75f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                        Text("${(chartMax * .5f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                        Text("${(chartMax * .25f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                        Text("0", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                     }
                                     BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.weight(1f).height(170.dp))
                                 }
                                 Row(Modifier.fillMaxWidth().padding(start = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Earlier samples", color = Muted, style = MaterialTheme.typography.labelSmall)
-                                    Text("Latest sample →", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    Text("Earlier samples", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                    Text("Latest sample →", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("━ Download · ${downloadSamples.size} samples", color = Color(0xFF32A8FF), style = MaterialTheme.typography.labelSmall)
-                                    Text("━ Upload · ${uploadSamples.size} samples", color = Color(0xFFFFA64D), style = MaterialTheme.typography.labelSmall)
+                                    Text("━ Download · ${downloadSamples.size} samples", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                                    Text("━ Upload · ${uploadSamples.size} samples", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
                                 }
-                                Text("Vertical axis = Mbps. Samples update about every 250 ms; download and upload are measured in separate phases, so compare each coloured line within its own phase.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Vertical axis = Mbps. Samples update about every 250 ms; download and upload are measured in separate phases, so compare each coloured line within its own phase.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                     StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
-                                     StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", Color(0xFF32A8FF), Modifier.weight(1f))
+                                     StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                                     StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
                                  }
                                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                     StatTile("UPLOAD AVG", "%.1f".format(uploadAverage), "Mbps", Color(0xFFFFA64D), Modifier.weight(1f))
-                                     StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", Color(0xFFFFA64D), Modifier.weight(1f))
+                                     StatTile("UPLOAD AVG", "%.1f".format(uploadAverage), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
+                                     StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
                                  }
-                                 Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                 Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                  val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
                                  if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = Teal, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.height(18.dp))
@@ -412,27 +409,27 @@ private fun SpeedTesterApp(context: Context) {
                                             finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
                                         }
                                     }
-                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
+                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
                                 error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                             }
                         }
                     }
-                    item { Text("LIVE DIAGNOSTICS", color = Muted, style = MaterialTheme.typography.labelLarge) }
+                    item { Text("LIVE DIAGNOSTICS", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge) }
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(18.dp)) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Timeline, null, tint = Teal); Spacer(Modifier.width(8.dp)); Text("Latest activity", fontWeight = FontWeight.SemiBold) }
                                 Spacer(Modifier.height(8.dp))
                                 Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    activityLog.takeLast(8).forEach { line -> Text("• " + line, color = if (line.startsWith("ERROR")) MaterialTheme.colorScheme.error else Muted, style = MaterialTheme.typography.bodySmall) }
+                                    activityLog.takeLast(8).forEach { line -> Text("• " + line, color = if (line.startsWith("ERROR")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
                                 }
                             }
                         }
                     }
-                    item { Text("CONNECTION", color = Muted, style = MaterialTheme.typography.labelLarge) }
+                    item { Text("CONNECTION", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge) }
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 InfoRow("Server discovery", if (serversLoading) "Discovering Mauritius servers…" else serverDiscoveryStatus)
                                 InfoRow("Discovery duration", if (serverDiscoveryMs >= 0) "%.2f s".format(java.util.Locale.US, serverDiscoveryMs / 1000.0) else "—")
@@ -440,7 +437,7 @@ private fun SpeedTesterApp(context: Context) {
                                 InfoRow("Test server", selectedServer?.let { "${it.sponsor.ifBlank { "Ookla server" }} · ${it.host}" } ?: serverDetails.host.ifBlank { "Not selected yet" })
                                 InfoRow("Server location", selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }?.takeIf { it.isNotBlank() } ?: serverDetails.location.ifBlank { "Not available yet" })
                                 InfoRow("Selected-server TCP ping", if (ping >= 0) "$ping ms" else selectedServer?.latencyMs?.let { "$it ms (directory scan)" } ?: "Measured during test")
-                                Text("Discovery duration measures the Mauritius server-directory lookup. Ping is measured separately against the selected endpoint.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                Text("Discovery duration measures the Mauritius server-directory lookup. Ping is measured separately against the selected endpoint.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 InfoRow("Protocol", "Ookla-compatible HTTPS transfer")
                                 InfoRow("Network", netInfo.type)
                                 InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
@@ -453,14 +450,14 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(18.dp)) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Timeline, null, tint = Teal)
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text("Detailed diagnostic log", fontWeight = FontWeight.SemiBold)
-                                        Text("${diagnosticLog.size} entries · keeps latest 500 · shows latest 30", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("${diagnosticLog.size} entries · keeps latest 500 · shows latest 30", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                     }
                                     IconButton(onClick = { diagnosticLogExpanded = !diagnosticLogExpanded }) {
                                         Icon(if (diagnosticLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (diagnosticLogExpanded) "Collapse diagnostic log" else "Expand diagnostic log", tint = Teal)
@@ -475,12 +472,12 @@ private fun SpeedTesterApp(context: Context) {
                                         TextButton(onClick = { diagnosticLog.clear() }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear") }
                                     }
                                     Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        if (diagnosticLog.isEmpty()) Text("Log is empty. Start a test to capture detailed diagnostics.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        if (diagnosticLog.isEmpty()) Text("Log is empty. Start a test to capture detailed diagnostics.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                         diagnosticLog.takeLast(30).forEach { line ->
-                                            Text(line, color = if (line.contains("FATAL") || line.contains("HTTP 4") || line.contains("ERROR")) MaterialTheme.colorScheme.error else Muted, style = MaterialTheme.typography.bodySmall)
+                                            Text(line, color = if (line.contains("FATAL") || line.contains("HTTP 4") || line.contains("ERROR")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
-                                    Text("Showing latest 8 lines. Copy exports the full in-memory log.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    Text("Showing latest 8 lines. Copy exports the full in-memory log.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }
@@ -503,42 +500,42 @@ private fun SpeedTesterApp(context: Context) {
                             }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear all history") }
                         }
                     }
-                    if (history.isEmpty()) item { Text("Your completed tests will appear here.", color = Muted) }
+                    if (history.isEmpty()) item { Text("Your completed tests will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(history) { item ->
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25))) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(formatHistoryDate(item.date), color = Muted, style = MaterialTheme.typography.labelMedium)
+                                Text(formatHistoryDate(item.date), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("DOWNLOAD", color = Color(0xFF42C9F5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text("DOWNLOAD", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                         Text("%.1f Mbps".format(item.download), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                        Text("Avg %.1f · Peak %.1f".format(item.downloadAverage, item.downloadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        Text("Avg %.1f · Peak %.1f".format(item.downloadAverage, item.downloadPeak), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text("UPLOAD", color = Color(0xFF8BE28B), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text("UPLOAD", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                         Text("%.1f Mbps".format(item.upload), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                        Text("Avg %.1f · Peak %.1f".format(item.uploadAverage, item.uploadPeak), color = Muted, style = MaterialTheme.typography.bodySmall)
+                                        Text("Avg %.1f · Peak %.1f".format(item.uploadAverage, item.uploadPeak), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
-                                HorizontalDivider(color = Color(0xFF293640))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("Ping", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("Ping", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                         Text("${item.ping} ms", fontWeight = FontWeight.SemiBold)
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text("Jitter", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("Jitter", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                         Text("%.1f ms".format(item.jitter), fontWeight = FontWeight.SemiBold)
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text("Loaded ping", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("Loaded ping", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                         Text(if (item.loadedPing >= 0) "${item.loadedPing} ms" else "—", fontWeight = FontWeight.SemiBold)
                                     }
                                 }
-                                Text("Loaded jitter %.1f ms  ·  Failed probes %d/%d".format(item.loadedJitter, item.failedProbes, item.probeCount), color = Muted, style = MaterialTheme.typography.bodySmall)
-                                Text("Server", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                Text("Loaded jitter %.1f ms  ·  Failed probes %d/%d".format(item.loadedJitter, item.failedProbes, item.probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Text("Server", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                 Text(item.server.ifBlank { "Server details unavailable" }, style = MaterialTheme.typography.bodySmall)
-                                HorizontalDivider(color = Color(0xFF293640))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.NetworkCheck, null, tint = Teal, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
@@ -575,7 +572,7 @@ private fun SpeedTesterApp(context: Context) {
                     item { Text("Server map", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
                     if (serversLoading || serverDiscoveryMs < 0L || availableServers.isEmpty()) {
                         item {
-                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                                 Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     if (serversLoading || serverDiscoveryMs < 0L) CircularProgressIndicator(color = Teal)
                                     Text(
@@ -583,17 +580,17 @@ private fun SpeedTesterApp(context: Context) {
                                             serversLoading || serverDiscoveryMs < 0L -> "Server map is disabled until discovery finishes."
                                             else -> "No Mauritius servers are available to plot. Refresh discovery on the Test page."
                                         },
-                                        color = Muted, style = MaterialTheme.typography.bodyMedium
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium
                                     )
                                 }
                             }
                         }
                     } else {
                         item {
-                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text("Mauritius test servers", fontWeight = FontWeight.Bold)
-                                    Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                                    Text("${serversWithDistance.count { it.latitude != null && it.longitude != null }} of  ${serversWithDistance.size} servers have map coordinates. Tap a marker for provider, city, distance and ping.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     val mapped = serversWithDistance.filter { it.latitude != null && it.longitude != null }
                                     if (mapped.isNotEmpty()) {
                                         ServerMapView(mapped, distanceOrigin.first, distanceOrigin.second, Modifier.fillMaxWidth().height(420.dp), userLocated = userLocated, onMapLog = { message ->
@@ -602,17 +599,17 @@ private fun SpeedTesterApp(context: Context) {
                                             while (activityLog.size > 8) activityLog.removeAt(0)
                                             logDiagnostic("MAP $message")
                                         })
-                                        Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                        Text("Server locations are approximate directory coordinates, not exact equipment addresses. © OpenStreetMap contributors.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                     } else {
-                                        Box(Modifier.fillMaxWidth().height(180.dp).background(Color(0xFF0D151B), RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
-                                            Text("The discovered server directory did not provide coordinates for these servers.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                                        Box(Modifier.fillMaxWidth().height(180.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(14.dp)).padding(18.dp), contentAlignment = Alignment.Center) {
+                                            Text("The discovered server directory did not provide coordinates for these servers.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                                         }
                                     }
                                 }
                             }
                         }
                         item {
-                            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("Servers · nearest first", fontWeight = FontWeight.Bold)
                                     serversWithDistance.forEachIndexed { index, server ->
@@ -620,11 +617,11 @@ private fun SpeedTesterApp(context: Context) {
                                             Text("${index + 1}.", color = Teal, fontWeight = FontWeight.Bold)
                                             Column(Modifier.weight(1f)) {
                                                 Text(server.label, fontWeight = FontWeight.SemiBold)
-                                                Text(server.city.ifBlank { server.host }, color = Muted, style = MaterialTheme.typography.bodySmall)
+                                                Text(server.city.ifBlank { server.host }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                             }
                                             Text(server.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "— km", color = Teal, style = MaterialTheme.typography.labelMedium)
                                         }
-                                        if (index < serversWithDistance.lastIndex) HorizontalDivider(color = Color(0xFF26343E))
+                                        if (index < serversWithDistance.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     }
                                 }
                             }
@@ -677,42 +674,41 @@ private fun UpdateSectionCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)),
-        shape = RoundedCornerShape(22.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
-            HorizontalDivider(color = Color(0xFF26343E))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             content()
         }
     }
 }
 
 @Composable private fun Metric(label: String, value: String, unit: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(label, color = Muted, style = MaterialTheme.typography.labelSmall); Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text(unit, color = Muted, style = MaterialTheme.typography.labelSmall) }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall); Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text(unit, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
 }
-@Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = Muted); Text(value, fontWeight = FontWeight.Medium) } }
+@Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontWeight = FontWeight.Medium) } }
 @Composable private fun BandwidthChart(downloadSamples: List<Float>, uploadSamples: List<Float>, modifier: Modifier = Modifier) {
-    Canvas(modifier.background(Color(0xFF0D151B), RoundedCornerShape(12.dp)).padding(8.dp)) {
+    Canvas(modifier.background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp)).padding(8.dp)) {
         val allSamples = downloadSamples + uploadSamples
         val maxValue = max(10f, allSamples.maxOrNull() ?: 10f)
         for (i in 0..4) {
             val y = size.height * i / 4f
-            drawLine(Color(0xFF26343E), Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+            drawLine(MaterialTheme.colorScheme.outlineVariant, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
         }
         fun drawSeries(samples: List<Float>, color: Color) { if (samples.size < 2) return; val path = Path(); samples.forEachIndexed { i, value -> val x = size.width * i / (samples.size - 1).toFloat(); val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height; if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)); val last = samples.last(); drawCircle(color, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height)) }
-        drawSeries(downloadSamples, Color(0xFF32A8FF)); drawSeries(uploadSamples, Color(0xFFFFA64D))
+        drawSeries(downloadSamples, MaterialTheme.colorScheme.primary); drawSeries(uploadSamples, MaterialTheme.colorScheme.tertiary)
     }
 }
 @Composable private fun StatTile(label: String, value: String, unit: String, tint: Color, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFF0D151B)), shape = RoundedCornerShape(12.dp)) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp)) {
-            Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             Text(value, color = tint, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-            Text(unit, color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(unit, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -790,7 +786,7 @@ private object ServerGeoLocator {
 }
 @Composable private fun TcpInfoRows(info: NdtTcpInfo?) {
     if (info == null || listOf(info.minRttUs, info.rttUs, info.rttVarUs, info.bytesRetrans, info.busyTimeUs, info.receiverLimitedUs, info.senderLimitedUs).all { it == null }) {
-        Text("Server did not provide TCP_INFO samples for this direction.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Server did not provide TCP_INFO samples for this direction.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         return
     }
     InfoRow("Server minimum RTT", info.minRttUs?.let { "%.2f ms".format(java.util.Locale.US, it / 1000.0) } ?: "—")
@@ -880,7 +876,7 @@ private fun ServerMapView(
         Row(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .padding(8.dp)
-                .background(Color(0xEE101820), RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(14.dp))
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
@@ -895,7 +891,7 @@ private fun ServerMapView(
                     },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text(source.name, color = if (tileSource == source) Teal else Color.White,
+                    Text(source.name, color = if (tileSource == source) Teal else MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.labelMedium)
                 }
             }
@@ -912,17 +908,17 @@ private fun ServerMapView(
 
         Column(
             modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp)
-                .background(Color(0xEE101820), RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(14.dp))
                 .padding(4.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val center = Offset(viewSize.width / 2f, viewSize.height / 2f)
             TextButton(onClick = { camera.zoomAround(center, viewSize.width, viewSize.height, tileSize, kotlin.math.floor(camera.zoom) + 1.0) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
-                Text("+", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                Text("+", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
             }
             TextButton(onClick = { camera.zoomAround(center, viewSize.width, viewSize.height, tileSize, kotlin.math.ceil(camera.zoom) - 1.0) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
-                Text("−", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                Text("−", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
             }
             TextButton(onClick = { camera.moveTo(originLat, originLon, if (userLocated) USER_LOCATION_ZOOM else 9.0) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                 Text("Here", color = Teal, style = MaterialTheme.typography.labelMedium)
