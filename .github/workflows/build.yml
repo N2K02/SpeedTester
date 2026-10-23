@@ -142,10 +142,18 @@ jobs:
         run: |
           set -euo pipefail
           TAG="experimental-pr-$PR_NUMBER-run-$GITHUB_RUN_NUMBER"
-          gh release create "$TAG" "$APP-$VERSION.apk" \
-            --repo "$GITHUB_REPOSITORY" --target "$PR_HEAD_SHA" \
-            --title "$APP experimental · PR #$PR_NUMBER · build $GITHUB_RUN_NUMBER" \
-            --notes-file release-notes.md --prerelease --latest=false
+          for attempt in 1 2 3; do
+            if gh release create "$TAG" "$APP-$VERSION.apk" \
+              --repo "$GITHUB_REPOSITORY" --target "$PR_HEAD_SHA" \
+              --title "$APP experimental · PR #$PR_NUMBER · build $GITHUB_RUN_NUMBER" \
+              --notes-file release-notes.md --prerelease --latest=false; then
+              exit 0
+            fi
+            echo "::warning::GitHub Releases request failed (attempt $attempt/3); retrying"
+            sleep $((attempt * 10))
+          done
+          echo "::error::GitHub Releases unavailable after 3 attempts; APK remains in workflow artifacts"
+          exit 1
 
       - name: Check public distribution configuration
         id: distribution
