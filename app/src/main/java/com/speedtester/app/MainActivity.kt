@@ -180,20 +180,6 @@ private fun SpeedTesterApp(context: Context) {
     var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
-    var experimentalEnabled by remember {
-        mutableStateOf(prefs.getBoolean("experimentalEnabled", false))
-    }
-    var updateMessage by remember { mutableStateOf("Tap Check for updates to see the latest release.") }
-    var updateDiagnostics by remember { mutableStateOf("") }
-    var updateDiagnosticsVisible by remember { mutableStateOf(false) }
-    var updateVersion by remember { mutableStateOf("") }
-    var updateUrl by remember { mutableStateOf("") }
-    var updateAvailable by remember { mutableStateOf(false) }
-    var updateDownloading by remember { mutableStateOf(false) }
-    var updateChecking by remember { mutableStateOf(false) }
-    var updateProgress by remember { mutableFloatStateOf(0f) }
-    var updateDownloadedBytes by remember { mutableLongStateOf(0L) }
-    var updateTotalBytes by remember { mutableLongStateOf(-1L) }
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     val diagnosticLog = remember { mutableStateListOf<String>() }
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
@@ -498,7 +484,6 @@ private fun SpeedTesterApp(context: Context) {
                             }
                         }
                     }
-                    if (updateMessage.isNotBlank()) item { Text(updateMessage, color = Teal, style = MaterialTheme.typography.bodySmall) }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     item { Text("Recent tests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
@@ -1298,165 +1283,5 @@ private object SpeedEngine {
         onLog("Ookla-compatible server: " + server.host + " (" + locationName + ")")
         onUpdate("Complete", 1f, 0f)
         SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, null, null, resolvedAddress, dnsLookupMs)
-    }
-}
-private data class ReleaseInfo(val version: String, val notes: String, val apkUrl: String, val available: Boolean, val message: String, val diagnostics: String = "", val sha256: String? = null, val size: Long = -1L)
-private object UpdateChecker {
-    private const val API = "https://api.github.com/repos/N2K02/SpeedTester/releases/latest"
-    /** The release found by the last check, so the download can be verified against it. */
-    @Volatile private var lastRelease: ReleaseInfo? = null
-    fun getRelease(context: Context): ReleaseInfo = try {
-        val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
-        val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "SpeedTester-Android").build()
-        // Prefer a public manifest so updates keep working with a private source repo.
-        fun fetchManifest(channel: String): JSONObject? = runCatching {
-            val req = Request.Builder().url("https://n2k02.github.io/speedtester/updates/$channel.json").build()
-            client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) error("No $channel manifest")
-                JSONObject(response.body?.string().orEmpty())
-            }
-        }.getOrNull()?.takeIf { candidate ->
-            candidate.optString("channel") == channel &&
-                candidate.optLong("versionCode") > 0 &&
-                candidate.optString("apkUrl").startsWith("https://github.com/") &&
-                Regex("[a-f0-9]{64}").matches(candidate.optString("sha256").lowercase())
-        }
-        val stable = fetchManifest("stable")
-        val experimental = if (context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)
-                .getBoolean("experimentalEnabled", false)) fetchManifest("experimental") else null
-        val manifest = listOfNotNull(stable, experimental).maxByOrNull { it.optLong("versionCode") }
-        val json = if (manifest != null &&
-            manifest.optString("apkUrl").startsWith("https://") &&
-            Regex("[a-f0-9]{64}").matches(manifest.optString("sha256").lowercase())) {
-            JSONObject()
-                .put("tag_name", "v" + manifest.optString("versionName"))
-                .put("body", manifest.optJSONArray("notes")?.let { notes ->
-                    (0 until notes.length()).joinToString("\\n") { "- " + notes.optString(it) }
-                } ?: "")
-                .put("assets", JSONArray().put(JSONObject()
-                    .put("name", manifest.optString("apkName"))
-                    .put("browser_download_url", manifest.optString("apkUrl"))
-                    .put("size", manifest.optLong("apkSize"))
-                    .put("digest", "sha256:" + manifest.optString("sha256"))))
-        } else client.newCall(request).execute().use { r ->
-            val body = r.body?.string().orEmpty()
-            if (!r.isSuccessful) error("GitHub Releases API returned HTTP " + r.code + " at " + r.request.url + "\nResponse body: " + body.take(2000))
-            JSONObject(body.ifBlank { "{}" })
-        }
-        val tag = json.optString("tag_name").removePrefix("v")
-        val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
-        val notes = json.optString("body").ifBlank { "No release notes were provided." }
-        var apkUrl = ""
-        var sha256: String? = null
-        var size = -1L
-        val assets = json.optJSONArray("assets")
-        if (assets != null) for (i in 0 until assets.length()) {
-            val asset = assets.getJSONObject(i)
-            if (asset.optString("name").endsWith(".apk", true)) {
-                apkUrl = asset.optString("browser_download_url")
-                sha256 = asset.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:")?.lowercase()
-                size = asset.optLong("size", -1L)
-                break
-            }
-        }
-        val installedInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        @Suppress("DEPRECATION")
-        val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) installedInfo.longVersionCode
-            else installedInfo.versionCode.toLong()
-        val isNewer = if (manifest != null) manifest.optLong("versionCode") > installedCode
-            else compareVersions(tag, current) > 0
-        val available = isNewer && apkUrl.isNotBlank()
-        val message = when {
-            !isNewer -> "You're up to date."
-            apkUrl.isBlank() -> "A newer release exists, but no APK is attached yet."
-            else -> "A new version is available."
-        }
-        ReleaseInfo(tag, notes, apkUrl, available, message, sha256 = sha256, size = size).also { lastRelease = it }
-    } catch (e: Exception) {
-        val report = "App: SpeedTester\nRepository: N2K02/SpeedTester\nStage: Release check\nRelease API URL: " + API + "\nException: " + e.javaClass.name + "\nMessage: " + (e.message ?: "No exception message")
-        ReleaseInfo("", "", "", false, "Update check failed. Tap Show details for diagnostics.", report)
-    }
-    fun downloadAndInstall(context: Context, apkUrl: String, onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit): String {
-        return try {
-        if (!context.packageManager.canRequestPackageInstalls()) {
-            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return "Allow installs from SpeedTester, then tap Download and install again."
-        }
-        val client = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
-        val response = client.newCall(Request.Builder().url(apkUrl).header("User-Agent", "SpeedTester-Android").build()).execute()
-        val apkFile = File(context.cacheDir, "updates/SpeedTester-update.apk")
-        apkFile.parentFile?.mkdirs()
-        response.use { r ->
-            if (!r.isSuccessful) {
-                val errorBody = r.body?.string().orEmpty()
-                error("APK download failed: HTTP " + r.code + " at " + r.request.url + "\nResponse body: " + errorBody.take(2000))
-            }
-            val body = r.body ?: error("GitHub returned an empty APK")
-            val totalBytes = body.contentLength()
-            var downloadedBytes = 0L
-            val buffer = ByteArray(64 * 1024)
-            body.byteStream().use { input ->
-                apkFile.outputStream().buffered().use { output ->
-                    onProgress(0L, totalBytes)
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        downloadedBytes += count
-                        onProgress(downloadedBytes, totalBytes)
-                    }
-                    output.flush()
-                }
-            }
-            if (totalBytes > 0L && downloadedBytes != totalBytes) error("APK download incomplete: received $downloadedBytes of $totalBytes bytes")
-        }
-        verifyApk(context, apkFile, lastRelease?.takeIf { it.apkUrl == apkUrl })?.let { problem ->
-            apkFile.delete()
-            error(problem)
-        }
-        val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
-        val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(install)
-        "APK downloaded and verified. Android's installer is ready."
-        } catch (e: Exception) { "Update failed: " + (e.message ?: "network error") }
-    }
-
-    /**
-     * Null when the APK is safe to hand to the installer, else what's wrong: same size and SHA-256 as
-     * GitHub lists, same app, a newer version, and signed with the key the installed app trusts.
-     */
-    @Suppress("DEPRECATION")
-    private fun verifyApk(context: Context, file: File, release: ReleaseInfo?): String? {
-        if (release != null && release.size > 0 && file.length() != release.size) return "The download was incomplete. Please try again."
-        release?.sha256?.let { expected ->
-            val md = java.security.MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buf = ByteArray(64 * 1024)
-                while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
-            }
-            val actual = md.digest().joinToString("") { "%02x".format(it) }
-            if (actual != expected) return "The download is damaged (checksum mismatch). Please try again."
-        }
-        val pm = context.packageManager
-        val flags = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
-        val apk = pm.getPackageArchiveInfo(file.path, flags) ?: return "The downloaded file isn't a valid app."
-        val mine = pm.getPackageInfo(context.packageName, flags)
-        if (apk.packageName != context.packageName) return "The downloaded file is a different app."
-        if (apk.longVersionCode <= mine.longVersionCode) return "The downloaded version isn't newer than this one."
-        fun signers(info: android.content.pm.PackageInfo): Set<String> {
-            val s = info.signingInfo ?: return emptySet()
-            val sigs = if (s.hasMultipleSigners()) s.apkContentsSigners else s.signingCertificateHistory
-            val md = java.security.MessageDigest.getInstance("SHA-256")
-            return sigs.orEmpty().map { sig -> md.digest(sig.toByteArray()).joinToString("") { "%02x".format(it) } }.toSet()
-        }
-        val a = signers(mine)
-        val b = signers(apk)
-        if (a.isNotEmpty() && b.isNotEmpty() && a.intersect(b).isEmpty()) return "This update is signed with a different key, so Android can't install it over the current app."
-        return null
-    }
-    private fun compareVersions(a: String, b: String): Int {
-        val x = a.split(".").map { it.toIntOrNull() ?: 0 }; val y = b.split(".").map { it.toIntOrNull() ?: 0 }
-        for (i in 0 until max(x.size, y.size)) { val d = (x.getOrNull(i) ?: 0).compareTo(y.getOrNull(i) ?: 0); if (d != 0) return d }
-        return 0
     }
 }
