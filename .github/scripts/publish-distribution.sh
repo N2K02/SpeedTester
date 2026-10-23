@@ -39,8 +39,24 @@ if [ -n "$CURRENT_JSON" ]; then
   fi
 fi
 ENC=$(base64 -w0 manifest.json)
-CURRENT_SHA=$(gh api "repos/$TARGET/contents/$MANIFEST" --jq .sha 2>/dev/null || true)
-ARGS=(--method PUT "repos/$TARGET/contents/$MANIFEST" -f "message=Publish $APP $VERSION ($CHANNEL)" -f "content=$ENC" -f "branch=main")
-[ -z "$CURRENT_SHA" ] || ARGS+=(-f "sha=$CURRENT_SHA")
-gh api "${ARGS[@]}" >/dev/null
-echo "Published $CHANNEL $APP $VERSION code=$VERSION_CODE to $MANIFEST"
+for attempt in 1 2 3 4 5; do
+  CURRENT_SHA=$(gh api "repos/$TARGET/contents/$MANIFEST" --jq .sha 2>/dev/null || true)
+  ARGS=(--method PUT "repos/$TARGET/contents/$MANIFEST" -f "message=Publish $APP $VERSION ($CHANNEL)" -f "content=$ENC" -f "branch=main")
+  [ -z "$CURRENT_SHA" ] || ARGS+=(-f "sha=$CURRENT_SHA")
+  if gh api "${ARGS[@]}" >/dev/null; then
+    echo "Published $CHANNEL $APP $VERSION code=$VERSION_CODE to $MANIFEST"
+    exit 0
+  fi
+  echo "::warning::Manifest update raced with another publication (attempt $attempt/5)"
+  CURRENT_JSON=$(gh api "repos/$TARGET/contents/$MANIFEST" --jq .content 2>/dev/null | tr -d '\\n' | base64 -d 2>/dev/null || true)
+  if [ -n "$CURRENT_JSON" ]; then
+    OLD=$(jq -r '.versionCode // 0' <<<"$CURRENT_JSON")
+    if [[ "$OLD" =~ ^[0-9]+$ ]] && (( OLD >= VERSION_CODE )); then
+      echo "Equal or newer manifest already published; keeping it."
+      exit 0
+    fi
+  fi
+  sleep $((attempt * 2))
+done
+echo "::error::Unable to publish manifest after retries"
+exit 1
