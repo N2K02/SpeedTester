@@ -93,6 +93,14 @@ class MainActivity : ComponentActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+private val N2K02ExpressiveShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(28.dp),
+    extraLarge = RoundedCornerShape(32.dp),
+)
+
 @Composable
 private fun SpeedTesterApp(context: Context) {
     val scope = rememberCoroutineScope()
@@ -224,7 +232,7 @@ private fun SpeedTesterApp(context: Context) {
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
-    MaterialTheme(colorScheme = darkColorScheme(primary = Teal, background = Color(0xFF0B1117), surface = Color(0xFF141D25), onSurface = Color(0xFFEAF2F5))) {
+    MaterialTheme(colorScheme = darkColorScheme(primary = Teal, background = Color(0xFF0B1117), surface = Color(0xFF141D25), onSurface = Color(0xFFEAF2F5)), shapes = N2K02ExpressiveShapes) {
         Scaffold(
             topBar = {
                 TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = Muted) } },
