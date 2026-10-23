@@ -652,7 +652,7 @@ private fun SpeedTesterApp(context: Context) {
                 ) {
                     item { Text("About & updates", style = MaterialTheme.typography.headlineMedium) }
                     item {
-                        ListItem(
+                        androidx.compose.material3.ListItem(
                             headlineContent = { Text("SpeedTester") },
                             supportingContent = { Text("Version " + BuildConfig.VERSION_NAME) },
                             leadingContent = { Icon(Icons.Default.Update, null) },
