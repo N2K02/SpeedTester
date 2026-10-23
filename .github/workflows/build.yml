@@ -142,18 +142,26 @@ jobs:
         run: |
           set -euo pipefail
           TAG="experimental-pr-$PR_NUMBER-run-$GITHUB_RUN_NUMBER"
-          for attempt in 1 2 3; do
-            if gh release create "$TAG" "$APP-$VERSION.apk" \
-              --repo "$GITHUB_REPOSITORY" --target "$PR_HEAD_SHA" \
-              --title "$APP experimental · PR #$PR_NUMBER · build $GITHUB_RUN_NUMBER" \
-              --notes-file release-notes.md --prerelease --latest=false; then
-              exit 0
-            fi
-            echo "::warning::GitHub Releases request failed (attempt $attempt/3); retrying"
-            sleep $((attempt * 10))
-          done
-          echo "::error::GitHub Releases unavailable after 3 attempts; APK remains in workflow artifacts"
-          exit 1
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APP-$VERSION.apk" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            for attempt in 1 2 3; do
+              if gh release create "$TAG" "$APP-$VERSION.apk" \
+                --repo "$GITHUB_REPOSITORY" --target "$PR_HEAD_SHA" \
+                --title "$APP experimental · PR #$PR_NUMBER · build $GITHUB_RUN_NUMBER" \
+                --notes-file release-notes.md --prerelease --latest=false; then
+                exit 0
+              fi
+              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                gh release upload "$TAG" "$APP-$VERSION.apk" --repo "$GITHUB_REPOSITORY" --clobber
+                exit 0
+              fi
+              echo "::warning::GitHub Releases request failed (attempt $attempt/3); retrying"
+              sleep $((attempt * 10))
+            done
+            echo "::error::GitHub Releases unavailable after 3 attempts; APK remains in workflow artifacts"
+            exit 1
+          fi
 
       - name: Check public distribution configuration
         id: distribution
