@@ -645,7 +645,7 @@ private fun SpeedTesterApp(context: Context) {
                         val experimental by LiveUpdater.experimentalEnabled.collectAsState()
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Experimental updates", style = MaterialTheme.typography.titleMedium)
+                                Text("Experimental updates", style = MaterialTheme.typography.titleSmall)
                                 Text("Offer signed APKs from successful pull request builds. Test builds may have bugs.")
                             }
                             Switch(checked = experimental, onCheckedChange = LiveUpdater::setExperimentalEnabled)
