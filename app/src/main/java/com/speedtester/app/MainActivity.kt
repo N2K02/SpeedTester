@@ -692,15 +692,16 @@ private fun UpdateSectionCard(
 }
 @Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontWeight = FontWeight.Medium) } }
 @Composable private fun BandwidthChart(downloadSamples: List<Float>, uploadSamples: List<Float>, modifier: Modifier = Modifier) {
-    Canvas(modifier.background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp)).padding(8.dp)) {
+    val scheme = MaterialTheme.colorScheme
+    Canvas(modifier.background(scheme.surfaceContainerLow).padding(8.dp)) {
         val allSamples = downloadSamples + uploadSamples
         val maxValue = max(10f, allSamples.maxOrNull() ?: 10f)
         for (i in 0..4) {
             val y = size.height * i / 4f
-            drawLine(MaterialTheme.colorScheme.outlineVariant, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+            drawLine(scheme.outlineVariant, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
         }
         fun drawSeries(samples: List<Float>, color: Color) { if (samples.size < 2) return; val path = Path(); samples.forEachIndexed { i, value -> val x = size.width * i / (samples.size - 1).toFloat(); val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height; if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)); val last = samples.last(); drawCircle(color, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height)) }
-        drawSeries(downloadSamples, MaterialTheme.colorScheme.primary); drawSeries(uploadSamples, MaterialTheme.colorScheme.tertiary)
+        drawSeries(downloadSamples, scheme.primary); drawSeries(uploadSamples, scheme.tertiary)
     }
 }
 @Composable private fun StatTile(label: String, value: String, unit: String, tint: Color, modifier: Modifier = Modifier) {
