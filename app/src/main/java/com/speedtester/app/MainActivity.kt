@@ -236,7 +236,7 @@ private fun SpeedTesterApp(context: Context) {
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
-    MaterialTheme(colorScheme = darkColorScheme(primary = Teal, background = Color(0xFF0B1117), surface = Color(0xFF141D25), onSurface = Color(0xFFEAF2F5)), shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(28.dp), medium = RoundedCornerShape(24.dp), large = RoundedCornerShape(32.dp))) {
+    MaterialExpressiveTheme(motionScheme = MotionScheme.expressive(), colorScheme = darkColorScheme(primary = Teal, background = Color(0xFF0B1117), surface = Color(0xFF141D25), onSurface = Color(0xFFEAF2F5)), shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(28.dp), medium = RoundedCornerShape(24.dp), large = RoundedCornerShape(32.dp))) {
         Scaffold(
             topBar = {
                 TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = Muted) } },
