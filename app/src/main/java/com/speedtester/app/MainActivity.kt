@@ -591,7 +591,7 @@ private fun SpeedTesterApp(context: Context) {
                         item {
                             Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF141D25)), shape = RoundedCornerShape(20.dp)) {
                                 Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    if (serversLoading || serverDiscoveryMs < 0L) CircularProgressIndicator(color = Teal)
+                                    if (serversLoading || serverDiscoveryMs < 0L) LoadingIndicator(Modifier.size(48.dp))
                                     Text(
                                         when {
                                             serversLoading || serverDiscoveryMs < 0L -> "Server map is disabled until discovery finishes."
