@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -10,7 +9,7 @@ val appVersionCode = appVersion.split(".").let { it[0].toInt() * 10 + it[1].toIn
 
 android {
     namespace = "com.speedtester.app"
-    compileSdk = 35
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.speedtester.app"
         minSdk = 29
@@ -28,7 +27,6 @@ android {
         }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
