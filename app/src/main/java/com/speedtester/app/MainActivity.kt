@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import dev.n2k02.theme.N2K02Theme
+import androidx.compose.foundation.clickable
+import dev.n2k02.updater.hasPendingUpdate
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -179,6 +181,8 @@ private fun SpeedTesterApp(context: Context) {
     var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
+    var showUpdateDetails by remember { mutableStateOf(false) }
+    val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     val diagnosticLog = remember { mutableStateListOf<String>() }
     var diagnosticLogExpanded by remember { mutableStateOf(false) }
@@ -250,9 +254,9 @@ private fun SpeedTesterApp(context: Context) {
                     )
                     NavigationBarItem(
                         selected = activeTab == 3,
-                        onClick = { activeTab = 3 },
-                        icon = { Icon(Icons.Default.Update, null) },
-                        label = { Text("Update") }
+                        onClick = { activeTab = 3; showUpdateDetails = false },
+                        icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Update, "Settings") } },
+                        label = { Text("Settings") }
                     )
                 }
             }, containerColor = MaterialTheme.colorScheme.background
@@ -628,11 +632,27 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                3 -> LazyColumn(
+                3 -> if (!showUpdateDetails) LazyColumn(
                     Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 ) {
+                    item { Text("Settings", style = MaterialTheme.typography.headlineMedium) }
+                    item {
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("About & updates") },
+                            supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
+                            leadingContent = { Icon(Icons.Default.Update, null) },
+                            trailingContent = { dev.n2k02.updater.N2K02UpdateBadge(updateStatus) },
+                            modifier = Modifier.clickable { showUpdateDetails = true },
+                        )
+                    }
+                } else LazyColumn(
+                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                ) {
+                    item { TextButton(onClick = { showUpdateDetails = false }) { Text("‹ Settings") } }
                     item { Text("About & updates", style = MaterialTheme.typography.headlineMedium) }
                     item {
                         androidx.compose.material3.ListItem(
