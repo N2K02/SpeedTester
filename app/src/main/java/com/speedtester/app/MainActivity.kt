@@ -232,18 +232,40 @@ private fun SpeedTesterApp(context: Context) {
     N2K02Theme {
         Scaffold(
             topBar = {
-                TopAppBar(title = {
-                    when {
-                        activeTab == 3 && showUpdateDetails -> dev.n2k02.updater.N2K02UpdateTitle()
-                        activeTab == 3 -> Text("Settings", fontWeight = FontWeight.Bold)
-                        activeTab == 2 -> Text("Server", fontWeight = FontWeight.Bold)
-                        activeTab == 1 -> Text("History", fontWeight = FontWeight.Bold)
-                        else -> Column { Text("SpeedTester", fontWeight = FontWeight.Bold)
-                            Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                },
-                    actions = {},
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
+                TopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                when {
+                                    activeTab == 3 && showUpdateDetails -> Icons.Default.Update
+                                    activeTab == 3 -> Icons.Default.Settings
+                                    activeTab == 2 -> Icons.Default.Timeline
+                                    activeTab == 1 -> Icons.Default.History
+                                    else -> Icons.Default.NetworkCheck
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp),
+                            )
+                            Text(when {
+                                activeTab == 3 && showUpdateDetails -> "About & updates"
+                                activeTab == 3 -> "Settings"
+                                activeTab == 2 -> "Server"
+                                activeTab == 1 -> "History"
+                                else -> "Test"
+                            }, fontWeight = FontWeight.SemiBold)
+                        }
+                    },
+                    actions = {
+                        dev.n2k02.updater.N2K02AppIcon(Modifier.size(28.dp))
+                        Text("SpeedTester", modifier = Modifier.padding(start = 6.dp, end = 12.dp),
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                )
             },
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
