@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -227,10 +228,20 @@ private fun SpeedTesterApp(context: Context) {
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
+    BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     N2K02Theme {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                TopAppBar(title = {
+                    when {
+                        activeTab == 3 && showUpdateDetails -> dev.n2k02.updater.N2K02UpdateTitle()
+                        activeTab == 3 -> Text("Settings", fontWeight = FontWeight.Bold)
+                        activeTab == 2 -> Text("Server", fontWeight = FontWeight.Bold)
+                        activeTab == 1 -> Text("History", fontWeight = FontWeight.Bold)
+                        else -> Column { Text("SpeedTester", fontWeight = FontWeight.Bold)
+                            Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                },
                     actions = {},
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
             },
@@ -637,7 +648,6 @@ private fun SpeedTesterApp(context: Context) {
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 ) {
-                    item { Text("Settings", style = MaterialTheme.typography.headlineMedium) }
                     item {
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
@@ -652,8 +662,6 @@ private fun SpeedTesterApp(context: Context) {
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 ) {
-                    item { TextButton(onClick = { showUpdateDetails = false }) { Text("‹ Settings") } }
-                    item { dev.n2k02.updater.N2K02UpdateTitle() }
                     item {
                         val experimental by LiveUpdater.experimentalEnabled.collectAsState()
                         dev.n2k02.updater.N2K02UpdateScreen(
