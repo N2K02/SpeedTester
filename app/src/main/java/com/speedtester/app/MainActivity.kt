@@ -229,6 +229,7 @@ private fun SpeedTesterApp(context: Context) {
         }.getOrElse { mutableStateListOf() }
     }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
+    BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
         Scaffold(
             topBar = {
@@ -255,7 +256,7 @@ private fun SpeedTesterApp(context: Context) {
                                 activeTab == 3 -> "Settings"
                                 activeTab == 2 -> "Server"
                                 activeTab == 1 -> "History"
-                                else -> "Test"
+                                else -> "Home"
                             }, fontWeight = FontWeight.SemiBold)
                         }
                     },
@@ -269,27 +270,17 @@ private fun SpeedTesterApp(context: Context) {
             },
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
-                    NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
                     NavigationBarItem(
-                        selected = activeTab == 2,
-                        onClick = {
-                            if (!serversLoading && serverDiscoveryMs >= 0L) {
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                                    requestDeviceLocation(context, onDeviceLocation)
-                                } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
-                                activeTab = 2
-                            }
-                        },
-                        enabled = !serversLoading && serverDiscoveryMs >= 0L,
-                        icon = { Icon(Icons.Default.Bolt, null) },
-                        label = { Text("Server") }
+                        selected = activeTab == 0,
+                        onClick = { activeTab = 0; showUpdateDetails = false },
+                        icon = { Icon(Icons.Default.NetworkCheck, null) },
+                        label = { Text("Home") },
                     )
                     NavigationBarItem(
-                        selected = activeTab == 3,
+                        selected = activeTab != 0,
                         onClick = { activeTab = 3; showUpdateDetails = false },
-                        icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Update, "Settings") } },
-                        label = { Text("Settings") }
+                        icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
+                        label = { Text("Settings") },
                     )
                 }
             }, containerColor = MaterialTheme.colorScheme.background
@@ -671,6 +662,25 @@ private fun SpeedTesterApp(context: Context) {
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 ) {
                     item {
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Test history") },
+                            supportingContent = { Text("Previous speed tests and CSV export") },
+                            leadingContent = { Icon(Icons.Default.History, null) },
+                            modifier = Modifier.clickable { activeTab = 1 },
+                        )
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Server map") },
+                            supportingContent = { Text("Discovered Mauritius speed-test servers") },
+                            leadingContent = { Icon(Icons.Default.Bolt, null) },
+                            modifier = Modifier.clickable {
+                                if (!serversLoading && serverDiscoveryMs >= 0L) {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                        requestDeviceLocation(context, onDeviceLocation)
+                                    } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                                }
+                                activeTab = 2
+                            },
+                        )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
                             supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
