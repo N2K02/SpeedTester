@@ -653,29 +653,14 @@ private fun SpeedTesterApp(context: Context) {
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 ) {
                     item { TextButton(onClick = { showUpdateDetails = false }) { Text("‹ Settings") } }
-                    item { Text("About & updates", style = MaterialTheme.typography.headlineMedium) }
-                    item {
-                        androidx.compose.material3.ListItem(
-                            headlineContent = { Text("SpeedTester") },
-                            supportingContent = { Text("Version " + BuildConfig.VERSION_NAME) },
-                            leadingContent = { Icon(Icons.Default.Update, null) },
-                        )
-                    }
+                    item { dev.n2k02.updater.N2K02UpdateTitle() }
                     item {
                         val experimental by LiveUpdater.experimentalEnabled.collectAsState()
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Experimental updates", style = MaterialTheme.typography.titleSmall)
-                                Text("Offer signed APKs from successful pull request builds. Test builds may have bugs.")
-                            }
-                            Switch(checked = experimental, onCheckedChange = LiveUpdater::setExperimentalEnabled)
-                        }
-                    }
-                    item { HorizontalDivider() }
-                    item {
                         dev.n2k02.updater.N2K02UpdateScreen(
                             controller = LiveUpdater.controller,
                             installGuard = LiveUpdater.installGuard,
+                            experimentalEnabled = experimental,
+                            onExperimentalEnabledChange = LiveUpdater::setExperimentalEnabled,
                         )
                     }
                 }
