@@ -657,11 +657,17 @@ private fun SpeedTesterApp(context: Context) {
                     }
                 }
                 3 -> if (!showUpdateDetails) LazyColumn(
-                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
                 ) {
                     item {
+                        Text(
+                            "Manage your speed tests",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 12.dp),
+                        )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("Test history") },
                             supportingContent = { Text("Previous speed tests and CSV export") },
@@ -681,6 +687,7 @@ private fun SpeedTesterApp(context: Context) {
                                 activeTab = 2
                             },
                         )
+                        HorizontalDivider()
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
                             supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
