@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
@@ -57,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -281,6 +283,18 @@ private fun SpeedTesterApp(context: Context) {
                         onClick = { activeTab = 3; showUpdateDetails = false },
                         icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
                         label = { Text("Settings") },
+                    )
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = {
+                            // Cancel discovery and an active network speed test before closing.
+                            scope.cancel()
+                            LiveUpdater.controller.cancel()
+                            (context as? ComponentActivity)?.finishAndRemoveTask()
+                        },
+                        icon = { Icon(Icons.Default.PowerSettingsNew, contentDescription = "Quit") },
+                        label = { Text("Quit") },
+                        alwaysShowLabel = true,
                     )
                 }
             }, containerColor = MaterialTheme.colorScheme.background
