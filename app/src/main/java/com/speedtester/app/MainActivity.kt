@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
@@ -56,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -227,36 +230,71 @@ private fun SpeedTesterApp(context: Context) {
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
+    BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
+    BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Column { Text("SpeedTester", fontWeight = FontWeight.Bold); Text("Network diagnostics", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-                    actions = {},
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
+                TopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                when {
+                                    activeTab == 3 && showUpdateDetails -> Icons.Default.Update
+                                    activeTab == 3 -> Icons.Default.Settings
+                                    activeTab == 2 -> Icons.Default.Timeline
+                                    activeTab == 1 -> Icons.Default.History
+                                    else -> Icons.Default.NetworkCheck
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp),
+                            )
+                            Text(when {
+                                activeTab == 3 && showUpdateDetails -> "About & updates"
+                                activeTab == 3 -> "Settings"
+                                activeTab == 2 -> "Server"
+                                activeTab == 1 -> "History"
+                                else -> "Home"
+                            }, fontWeight = FontWeight.SemiBold)
+                        }
+                    },
+                    actions = {
+                        dev.n2k02.updater.N2K02AppIcon(Modifier.size(28.dp))
+                        Text("SpeedTester", modifier = Modifier.padding(start = 6.dp, end = 12.dp),
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                )
             },
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    NavigationBarItem(selected = activeTab == 0, onClick = { activeTab = 0 }, icon = { Icon(Icons.Default.NetworkCheck, null) }, label = { Text("Test") })
-                    NavigationBarItem(selected = activeTab == 1, onClick = { activeTab = 1 }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
                     NavigationBarItem(
-                        selected = activeTab == 2,
-                        onClick = {
-                            if (!serversLoading && serverDiscoveryMs >= 0L) {
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                                    requestDeviceLocation(context, onDeviceLocation)
-                                } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
-                                activeTab = 2
-                            }
-                        },
-                        enabled = !serversLoading && serverDiscoveryMs >= 0L,
-                        icon = { Icon(Icons.Default.Bolt, null) },
-                        label = { Text("Server") }
+                        selected = activeTab == 0,
+                        onClick = { activeTab = 0; showUpdateDetails = false },
+                        icon = { Icon(Icons.Default.NetworkCheck, null) },
+                        label = { Text("Home") },
                     )
                     NavigationBarItem(
-                        selected = activeTab == 3,
+                        selected = activeTab != 0,
                         onClick = { activeTab = 3; showUpdateDetails = false },
-                        icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Update, "Settings") } },
-                        label = { Text("Settings") }
+                        icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
+                        label = { Text("Settings") },
+                    )
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = {
+                            // Cancel discovery and an active network speed test before closing.
+                            scope.cancel()
+                            LiveUpdater.controller.cancel()
+                            (context as? ComponentActivity)?.finishAndRemoveTask()
+                        },
+                        icon = { Icon(Icons.Default.PowerSettingsNew, contentDescription = "Quit") },
+                        label = { Text("Quit") },
+                        alwaysShowLabel = true,
                     )
                 }
             }, containerColor = MaterialTheme.colorScheme.background
@@ -633,12 +671,37 @@ private fun SpeedTesterApp(context: Context) {
                     }
                 }
                 3 -> if (!showUpdateDetails) LazyColumn(
-                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
                 ) {
-                    item { Text("Settings", style = MaterialTheme.typography.headlineMedium) }
                     item {
+                        Text(
+                            "Manage your speed tests",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 12.dp),
+                        )
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Test history") },
+                            supportingContent = { Text("Previous speed tests and CSV export") },
+                            leadingContent = { Icon(Icons.Default.History, null) },
+                            modifier = Modifier.clickable { activeTab = 1 },
+                        )
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Server map") },
+                            supportingContent = { Text("Discovered Mauritius speed-test servers") },
+                            leadingContent = { Icon(Icons.Default.Bolt, null) },
+                            modifier = Modifier.clickable {
+                                if (!serversLoading && serverDiscoveryMs >= 0L) {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                        requestDeviceLocation(context, onDeviceLocation)
+                                    } else locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                                }
+                                activeTab = 2
+                            },
+                        )
+                        HorizontalDivider()
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
                             supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
@@ -652,8 +715,6 @@ private fun SpeedTesterApp(context: Context) {
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 ) {
-                    item { TextButton(onClick = { showUpdateDetails = false }) { Text("‹ Settings") } }
-                    item { dev.n2k02.updater.N2K02UpdateTitle() }
                     item {
                         val experimental by LiveUpdater.experimentalEnabled.collectAsState()
                         dev.n2k02.updater.N2K02UpdateScreen(
