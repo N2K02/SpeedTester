@@ -10,6 +10,9 @@ import android.location.LocationManager
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.SystemClock
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -91,6 +94,12 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
     var locationGranted by remember { mutableStateOf(hasFineLocation(context)) }
     var locationOn by remember { mutableStateOf(isLocationEnabled(context)) }
     var running by remember { mutableStateOf(true) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var inForeground by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { inForeground = true }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { inForeground = false }
     var band by remember { mutableStateOf(WifiBand.TWO_FOUR) }
     var panel by remember { mutableStateOf(WifiPanel.GRAPH) }
     var points by remember { mutableStateOf(emptyList<WifiAccessPoint>()) }
@@ -109,7 +118,8 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
             val age = if (newest > 0) ((SystemClock.elapsedRealtimeNanos() / 1000 - newest).coerceAtLeast(0) / 1_000_000) else -1L
             if (updated) {
                 lastUpdated = System.currentTimeMillis()
-                status = "Updated just now"
+                status = if (results.isEmpty()) "Scan complete · no networks" else
+                    if (age >= 0) "Scan complete · results ${age}s old" else "Scan complete"
             } else if (results.isNotEmpty()) {
                 status = if (age >= 0) "Cached scan · " + age + "s old" else "Cached Wi-Fi scan"
             } else {
@@ -148,8 +158,8 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
     }
 
     // Receiver and refresh loop only live while this submenu is on screen. No background scanning.
-    DisposableEffect(locationGranted, wifi) {
-        if (!locationGranted) return@DisposableEffect onDispose {}
+    DisposableEffect(locationGranted, inForeground, wifi) {
+        if (!locationGranted || !inForeground) return@DisposableEffect onDispose {}
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
                 if (intent?.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) {
@@ -163,13 +173,17 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
         )
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
-    LaunchedEffect(locationGranted, running) {
-        if (locationGranted && running) {
+    LaunchedEffect(locationGranted, running, inForeground) {
+        if (WifiScanPolicy.shouldScan(locationGranted, running, inForeground, isLocationEnabled(context))) {
             requestScan()
             while (true) {
-                delay(30_000L) // Target a 30-second refresh; Android may still throttle and return cached results.
-                if (isLocationEnabled(context)) requestScan()
-                else { locationOn = false; status = "Turn on Location to scan Wi-Fi" }
+                delay(30_000L) // Android may throttle scans and return cached results.
+                if (WifiScanPolicy.shouldScan(locationGranted, running, inForeground, isLocationEnabled(context))) {
+                    requestScan()
+                } else {
+                    locationOn = isLocationEnabled(context)
+                    status = "Turn on Location to scan Wi-Fi"
+                }
             }
         }
     }

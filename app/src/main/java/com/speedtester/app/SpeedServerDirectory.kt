@@ -81,7 +81,7 @@ internal fun SpeedServerDirectory(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { sortByLatency = !sortByLatency }) {
-                    Text("Sort: " + if (sortByLatency) "Lowest ping" else "Nearest")
+                    Text("Sort: " + if (sortByLatency) "Lowest TCP ping" else "Nearest")
                 }
             }
         }

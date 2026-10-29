@@ -76,7 +76,7 @@ private fun HMetric(label: String, value: String, hint: String, tint: Color, mod
 @Composable
 private fun SummaryMetrics(item: TestResult) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        HMetric("PING", if (item.ping < 0) "—" else item.ping.toString() + " ms",
+        HMetric("TCP PING", if (item.ping < 0) "—" else item.ping.toString() + " ms",
             "Idle", pingColor, Modifier.weight(1f))
         HMetric("JITTER", speed(item.jitter) + " ms", "Idle", upColor, Modifier.weight(1f))
         HMetric("LOADED", if (item.loadedPing < 0) "—" else item.loadedPing.toString() + " ms",
@@ -275,9 +275,9 @@ internal fun SpeedTestResultDetails(
         }
         item {
             DetailsCard("Latency details") {
-                DetailLine("Ping", if (result.ping < 0) "—" else result.ping.toString() + " ms")
+                DetailLine("TCP ping", if (result.ping < 0) "—" else result.ping.toString() + " ms")
                 DetailLine("Jitter", speed(result.jitter) + " ms")
-                DetailLine("Loaded ping", if (result.loadedPing < 0) "—" else result.loadedPing.toString() + " ms")
+                DetailLine("Loaded TCP ping", if (result.loadedPing < 0) "—" else result.loadedPing.toString() + " ms")
                 DetailLine("Loaded jitter", speed(result.loadedJitter) + " ms")
                 DetailLine("Failed TCP probes", result.failedProbes.toString() + "/" + result.probeCount)
             }

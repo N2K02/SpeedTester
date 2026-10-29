@@ -4,7 +4,7 @@ package com.speedtester.app
 internal object SpeedHistoryCsv {
     private val header = listOf(
         "date", "download_mbps", "upload_mbps", "download_average_mbps", "download_peak_mbps",
-        "upload_average_mbps", "upload_peak_mbps", "ping_ms", "jitter_ms", "loaded_ping_ms",
+        "upload_average_mbps", "upload_peak_mbps", "tcp_ping_ms", "jitter_ms", "loaded_tcp_ping_ms",
         "loaded_jitter_ms", "failed_tcp_probes", "total_tcp_probes", "server", "network_type",
         "internet_available", "wifi_signal", "wifi_quality", "wifi_link_speed", "wifi_frequency",
         "connection_note", "discovery_status", "discovery_ms", "wifi_ssid", "wifi_bssid"

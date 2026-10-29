@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -230,17 +231,28 @@ private fun SpeedTesterApp(context: Context) {
     val uploadSamples = remember { mutableStateListOf<Float>() }
     val history = remember {
         runCatching {
-            val arr = org.json.JSONArray(TestHistoryStore.read(context, prefs.getString("history", "[]")))
-            (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
-                TestResult(o.optString("date"), o.optDouble("download"), o.optDouble("upload"), o.optLong("ping", -1), o.optDouble("jitter"), o.optString("server"), o.optDouble("downloadAverage", 0.0).finiteOrZero(), o.optDouble("downloadPeak", 0.0).finiteOrZero(), o.optDouble("uploadAverage", 0.0).finiteOrZero(), o.optDouble("uploadPeak", 0.0).finiteOrZero(), o.optLong("loadedPing", -1), o.optDouble("loadedJitter", 0.0).finiteOrZero(), o.optInt("failedProbes"), o.optInt("probeCount"), o.optString("networkType", "Unknown"), o.optBoolean("internetAvailable", false), o.optString("wifiSignal", "—"), o.optString("wifiQuality", "—"), o.optString("wifiLink", "—"), o.optString("wifiFrequency", "—"), o.optString("connectionNote", ""), o.optString("discoveryStatus", "Not recorded"), o.optLong("discoveryMs", -1), o.optString("wifiSsid", "Unavailable"), o.optString("wifiBssid", "Unavailable"))
-            }.toMutableStateList()
+            HistoryJsonCodec.decode(TestHistoryStore.read(context, prefs.getString("history", "[]")))
+                .toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
-    var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
+    // The UI list is only modified once the durable AtomicFile write succeeds.
+    fun persistHistory(next: List<TestResult>): Boolean {
+        val ok = HistoryCommitPolicy.commit(next, { items ->
+            TestHistoryStore.write(context, HistoryJsonCodec.encode(items))
+        }, { items ->
+            history.clear()
+            history.addAll(items)
+        })
+        if (!ok) {
+            error = "Could not save history. Check device storage."
+            logDiagnostic("HISTORY_WRITE_FAILED")
+        }
+        return ok
+    }
+ mutableStateOf<TestResult?>(null) }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
     BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
-    BackHandler(enabled = activeTab == 4 || activeTab == 5) { activeTab = 3 }
+    BackHandler(enabled = activeTab == 4 || activeTab == 5 || activeTab == 9) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -258,6 +270,7 @@ private fun SpeedTesterApp(context: Context) {
                                     activeTab == 7 -> Icons.Default.NetworkCheck
                                     activeTab == 6 -> Icons.Default.Bolt
                                     activeTab == 5 -> Icons.Default.Wifi
+                                    activeTab == 9 -> Icons.Default.LocationOn
                                     activeTab == 4 -> Icons.Rounded.Article
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
@@ -274,6 +287,7 @@ private fun SpeedTesterApp(context: Context) {
                                 activeTab == 7 -> "Network Info"
                                 activeTab == 6 -> "Test Servers"
                                 activeTab == 5 -> "Wi-Fi Analyser"
+                                activeTab == 9 -> "Permissions"
                                 activeTab == 4 -> "Logs"
                                 activeTab == 3 && showUpdateDetails -> "About & updates"
                                 activeTab == 3 -> "Settings"
@@ -323,6 +337,7 @@ private fun SpeedTesterApp(context: Context) {
         ) { padding ->
             when (activeTab) {
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
+                9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 4 -> SpeedTesterLogsPage(
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
@@ -370,10 +385,17 @@ private fun SpeedTesterApp(context: Context) {
                                         Text(if (netInfo.type == "Wi-Fi") "Wi-Fi · " + netInfo.ssid else netInfo.type,
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                        if (netInfo.type == "Wi-Fi") Text("BSSID: " + netInfo.bssid,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1)
+                                        if (netInfo.type == "Wi-Fi") {
+                                            Text("BSSID: " + netInfo.bssid,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1)
+                                            if (netInfo.ssid == "Unavailable" || netInfo.bssid == "Unavailable") {
+                                                TextButton(onClick = { activeTab = 9 }) {
+                                                    Text("Manage Wi-Fi permissions")
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -394,7 +416,7 @@ private fun SpeedTesterApp(context: Context) {
                                 SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("Ping", style = MaterialTheme.typography.labelSmall)
+                                        Text("TCP ping", style = MaterialTheme.typography.labelSmall)
                                         val shownPing = if (testing && livePing >= 0) livePing
                                             else if (ping >= 0) ping else history.firstOrNull()?.ping ?: -1
                                         Text(if (shownPing >= 0) shownPing.toString() + " ms" else "—",
@@ -423,6 +445,21 @@ private fun SpeedTesterApp(context: Context) {
                                         logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
                                         val testNetworkAtStart = readNetworkInfo(context)
+                                        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                                        val networkAtStart = connectivity.activeNetwork
+                                        val changedDuringTest = java.util.concurrent.atomic.AtomicBoolean(false)
+                                        val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+                                            override fun onAvailable(network: android.net.Network) {
+                                                if (network != networkAtStart) changedDuringTest.set(true)
+                                            }
+                                            override fun onLost(network: android.net.Network) {
+                                                if (network == networkAtStart) changedDuringTest.set(true)
+                                            }
+                                        }
+                                        val watchingNetwork = runCatching {
+                                            connectivity.registerDefaultNetworkCallback(networkCallback)
+                                            true
+                                        }.getOrDefault(false)
                                         scope.launch {
                                             try {
                                                 val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), selectedServer, { server ->
@@ -452,13 +489,30 @@ private fun SpeedTesterApp(context: Context) {
                                                 downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
                                                 loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
                                                 val connectionSnapshot = readNetworkInfo(context)
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, connectionSnapshot.type, connectionSnapshot.connected, connectionSnapshot.signal, connectionSnapshot.quality, connectionSnapshot.link, connectionSnapshot.frequency, connectionSnapshot.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
-                                                history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
-                                                val arr = org.json.JSONArray()
-                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount).put("networkType", x.networkType).put("internetAvailable", x.internetAvailable).put("wifiSignal", x.wifiSignal).put("wifiQuality", x.wifiQuality).put("wifiLink", x.wifiLink).put("wifiFrequency", x.wifiFrequency).put("connectionNote", x.connectionNote).put("discoveryStatus", x.discoveryStatus).put("discoveryMs", x.discoveryMs).put("wifiSsid", x.wifiSsid).put("wifiBssid", x.wifiBssid)) }
-                                                TestHistoryStore.write(context, arr); logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
+                                                val networkChanged = changedDuringTest.get() ||
+                                                    connectivity.activeNetwork != networkAtStart ||
+                                                    NetworkSnapshotPolicy.changed(
+                                                        testNetworkAtStart.type, connectionSnapshot.type,
+                                                        testNetworkAtStart.ssid, connectionSnapshot.ssid,
+                                                        testNetworkAtStart.bssid, connectionSnapshot.bssid
+                                                    )
+                                                if (networkChanged) {
+                                                    status = "Network changed — test not saved"
+                                                    error = "Connection changed during the test. Retry on a stable network."
+                                                    logDiagnostic("NETWORK_CHANGED_DURING_TEST — discarding mixed-network result")
+                                                    return@launch
+                                                }
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(selectedServer?.host.orEmpty(), selectedServer?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
+                                                if (!persistHistory((listOf(saved) + history).take(100))) {
+                                                    status = "Test complete — history not saved"
+                                                    return@launch
+                                                }
+ logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
                                             } catch (e: Exception) { if (e is CancellationException) throw e; if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
-                                            finally { testing = false; gaugeUpload = false; progress = 1f; netInfo = readNetworkInfo(context) }
+                                            finally {
+                                                if (watchingNetwork) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+                                                testing = false; gaugeUpload = false; progress = 1f; netInfo = readNetworkInfo(context)
+                                            }
                                         }
                                     }
                                 }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
@@ -530,8 +584,7 @@ private fun SpeedTesterApp(context: Context) {
                             
                     },
                     clear = {
-                        TestHistoryStore.write(context, org.json.JSONArray())
-                        history.clear()
+                        persistHistory(emptyList())
                     },
                     open = { result -> selectedHistory = result; activeTab = 8 }
                 )
@@ -546,12 +599,11 @@ private fun SpeedTesterApp(context: Context) {
                             back = { selectedHistory = null; activeTab = 1 },
                             share = { shareTestResult(context, result) },
                             delete = {
-history.remove(result)
-                                        val updatedHistory = org.json.JSONArray()
-                                        history.forEach { x -> updatedHistory.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount).put("networkType", x.networkType).put("internetAvailable", x.internetAvailable).put("wifiSignal", x.wifiSignal).put("wifiQuality", x.wifiQuality).put("wifiLink", x.wifiLink).put("wifiFrequency", x.wifiFrequency).put("connectionNote", x.connectionNote).put("discoveryStatus", x.discoveryStatus).put("discoveryMs", x.discoveryMs).put("wifiSsid", x.wifiSsid).put("wifiBssid", x.wifiBssid)) }
-                                        TestHistoryStore.write(context, updatedHistory)
-                                selectedHistory = null
-                                activeTab = 1
+                                val remaining = history.toMutableList().apply { remove(result) }
+                                if (persistHistory(remaining)) {
+                                    selectedHistory = null
+                                    activeTab = 1
+                                }
                             }
                         )
                     }
@@ -610,8 +662,8 @@ history.remove(result)
                                         Text("To display the network name, Android needs precise Location permission and enabled Location services.",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             style = MaterialTheme.typography.bodySmall)
-                                        TextButton(onClick = { activeTab = 5 }) {
-                                            Text("Open Wi-Fi Analyser to grant permission")
+                                        TextButton(onClick = { activeTab = 9 }) {
+                                            Text("Open Permissions")
                                         }
                                     }
                                 }
@@ -693,6 +745,12 @@ history.remove(result)
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 12.dp),
+                        )
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Permissions") },
+                            supportingContent = { Text("Wi-Fi scanning, precise location and Android access") },
+                            leadingContent = { Icon(Icons.Default.LocationOn, null) },
+                            modifier = Modifier.clickable { activeTab = 9; showUpdateDetails = false },
                         )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("Test history") },
