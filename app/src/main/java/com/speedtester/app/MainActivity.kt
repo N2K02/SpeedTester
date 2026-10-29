@@ -244,7 +244,7 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
-                                    activeTab == 4 -> Icons.Default.BugReport
+                                    activeTab == 4 -> Icons.Default.Settings
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
                                     activeTab == 2 -> Icons.Default.Timeline
