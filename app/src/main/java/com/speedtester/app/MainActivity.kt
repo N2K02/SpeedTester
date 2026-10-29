@@ -230,6 +230,7 @@ private fun SpeedTesterApp(context: Context) {
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
+    BackHandler(enabled = activeTab == 4) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -243,6 +244,7 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
+                                    activeTab == 4 -> Icons.Default.BugReport
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
                                     activeTab == 2 -> Icons.Default.Timeline
@@ -254,6 +256,7 @@ private fun SpeedTesterApp(context: Context) {
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(when {
+                                activeTab == 4 -> "Logs"
                                 activeTab == 3 && showUpdateDetails -> "About & updates"
                                 activeTab == 3 -> "Settings"
                                 activeTab == 2 -> "Server"
@@ -300,6 +303,10 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
+                4 -> SpeedTesterLogsPage(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    onBack = { activeTab = 3 },
+                )
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
@@ -702,14 +709,10 @@ private fun SpeedTesterApp(context: Context) {
                             },
                         )
                         HorizontalDivider()
-                        val logScreenContext = androidx.compose.ui.platform.LocalContext.current
                         ListItem(
                             headlineContent = { Text("Logs") },
                             supportingContent = { Text("Private diagnostic and crash history") },
-                            modifier = Modifier.clickable {
-                                val app = logScreenContext
-                                app.startActivity(android.content.Intent(app, com.speedtester.app.LogsActivity::class.java))
-                            },
+                            modifier = Modifier.clickable { activeTab = 4; showUpdateDetails = false },
                         )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
