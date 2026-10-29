@@ -26,7 +26,7 @@ class ReleaseReadinessTest {
         val wifi = source("WifiAnalyzerScreen.kt")
         assertTrue(wifi.contains("Lifecycle.Event.ON_STOP"))
         assertTrue(wifi.contains("DisposableEffect(locationGranted, inForeground, wifi)"))
-        assertTrue(wifi.contains("LaunchedEffect(locationGranted, running, inForeground)"))
+        assertTrue(wifi.contains("LaunchedEffect(locationGranted, running, inForeground, locationOn)"))
         assertTrue(wifi.contains("WifiScanPolicy.shouldScan("))
         assertTrue(WifiScanPolicy.shouldScan(true, true, true, true))
         assertFalse(WifiScanPolicy.shouldScan(true, true, false, true))
