@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 
@@ -35,7 +36,7 @@ internal fun readSpeedPermissions(context: Context): SpeedPermissionStatus =
         precise = permissionGranted(context, Manifest.permission.ACCESS_FINE_LOCATION),
         approximate = permissionGranted(context, Manifest.permission.ACCESS_COARSE_LOCATION),
         locationEnabled = runCatching {
-            (context.getSystemService(Context.LOCATION_SERVICE) as LocationManager).isLocationEnabled
+            LocationManagerCompat.isLocationEnabled(context.getSystemService(Context.LOCATION_SERVICE) as LocationManager)
         }.getOrDefault(false),
         wifiState = permissionGranted(context, Manifest.permission.ACCESS_WIFI_STATE),
         networkState = permissionGranted(context, Manifest.permission.ACCESS_NETWORK_STATE),

@@ -908,7 +908,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val allowedName = isWifi &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
         runCatching {
-            (context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager).isLocationEnabled
+            LocationManagerCompat.isLocationEnabled(context.getSystemService(Context.LOCATION_SERVICE) as LocationManager)
         }.getOrDefault(false)
     val direct = if (allowedName) runCatching { wifi.connectionInfo }.getOrNull() else null
     val rawName = if (allowedName) listOf(info?.ssid, direct?.ssid)

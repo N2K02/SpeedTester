@@ -13,6 +13,7 @@ import android.os.SystemClock
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.location.LocationManagerCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -62,7 +63,7 @@ private val wifiPalette = listOf(
 private enum class WifiPanel { GRAPH, NETWORKS, BEST, CONNECTION, CHANNELS }
 
 private fun isLocationEnabled(context: Context): Boolean =
-    (context.getSystemService(Context.LOCATION_SERVICE) as LocationManager).isLocationEnabled
+    LocationManagerCompat.isLocationEnabled(context.getSystemService(Context.LOCATION_SERVICE) as LocationManager)
 
 private fun hasFineLocation(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
