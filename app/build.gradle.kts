@@ -19,7 +19,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
-        getByName("debug") { applicationIdSuffix = ".experimental"; versionNameSuffix = "-debug" }
+        getByName("debug") { versionNameSuffix = "-debug" }
         release {
             // CI signs the unsigned release APK using the encrypted MRadio signing material.
             isMinifyEnabled = true
