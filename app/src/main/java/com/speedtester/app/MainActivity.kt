@@ -246,10 +246,11 @@ private fun SpeedTesterApp(context: Context) {
         if (!ok) {
             error = "Could not save history. Check device storage."
             logDiagnostic("HISTORY_WRITE_FAILED")
+            android.widget.Toast.makeText(context, "Could not save history. Check device storage.", android.widget.Toast.LENGTH_LONG).show()
         }
         return ok
     }
- mutableStateOf<TestResult?>(null) }
+    var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
     BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
     BackHandler(enabled = activeTab == 4 || activeTab == 5 || activeTab == 9) { activeTab = 3 }

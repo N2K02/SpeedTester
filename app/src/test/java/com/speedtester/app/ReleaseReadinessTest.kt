@@ -64,6 +64,8 @@ class ReleaseReadinessTest {
         val main = source("MainActivity.kt")
         assertTrue(main.contains("persistHistory((listOf(saved) + history).take(100))"))
         assertTrue(main.contains("persistHistory(emptyList())"))
+        assertTrue(main.contains("var selectedHistory by remember"))
+        assertTrue(main.contains("Toast.makeText(context"))
         assertFalse(main.contains("history.remove(result)"))
     }
 

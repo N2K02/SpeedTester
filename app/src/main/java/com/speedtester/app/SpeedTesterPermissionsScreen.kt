@@ -67,7 +67,7 @@ internal fun SpeedTesterPermissionsScreen(context: Context, modifier: Modifier =
 
     Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Permissions & access", style = MaterialTheme.typography.titleLarge)
+        Text("Permission status", style = MaterialTheme.typography.titleLarge)
         Text("Internet access is required for speed tests. Precise location and enabled device Location are used for Wi-Fi SSID, BSSID and nearby network scans.",
             style = MaterialTheme.typography.bodyMedium)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
