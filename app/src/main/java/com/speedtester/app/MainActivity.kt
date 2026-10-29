@@ -474,9 +474,6 @@ private fun SpeedTesterApp(context: Context) {
                                 }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
                                 error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                            }
-                        }
-                    }
                                 TextButton(onClick = { showExtendedMetrics = !showExtendedMetrics }) {
                                     Text(if (showExtendedMetrics) "Hide detailed metrics" else "Detailed metrics")
                                 }
