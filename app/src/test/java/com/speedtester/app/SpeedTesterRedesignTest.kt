@@ -56,7 +56,7 @@ class SpeedTesterRedesignTest {
         assertTrue(main.contains("7 -> LazyColumn("))
         assertTrue(main.contains("8 -> {"))
         assertTrue(main.contains("netInfo.ssid"))
-        assertTrue(main.contains("connectionSnapshot.ssid"))
+        assertTrue(main.contains("testNetworkAtStart.ssid"))
         assertTrue(main.contains("wifiSsid"))
         assertTrue(history.contains("HistoryFilter.WIFI"))
         assertTrue(history.contains("DetailLine(\"Wi-Fi name (SSID)\""))
