@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -212,6 +214,12 @@ private fun SpeedTesterApp(context: Context) {
     var serverIp by remember { mutableStateOf("") }
     var dnsLookupMs by remember { mutableLongStateOf(-1L) }
     var loggedPhase by remember { mutableStateOf("") }
+    var gaugeUpload by remember { mutableStateOf(false) }
+    var gaugeRunId by remember { mutableIntStateOf(0) }
+    var liveDownloadMbps by remember { mutableFloatStateOf(0f) }
+    var liveUploadMbps by remember { mutableFloatStateOf(0f) }
+    var showExtendedMetrics by remember { mutableStateOf(false) }
+    var showServerPicker by remember { mutableStateOf(false) }
     var livePing by remember { mutableLongStateOf(-1L) }
     var liveJitter by remember { mutableDoubleStateOf(0.0) }
     // All detailed test diagnostics now use the standard opt-in persistent Logs page.
@@ -310,6 +318,212 @@ private fun SpeedTesterApp(context: Context) {
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("⚡  Ping", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.labelMedium)
+                                        val shownPing = if (livePing >= 0) livePing else if (ping >= 0) ping
+                                            else history.firstOrNull()?.ping ?: -1L
+                                        Text(if (shownPing < 0) "—" else "$shownPing ms",
+                                            fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                    }
+                                    VerticalDivider(Modifier.height(36.dp))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("〰  Jitter", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.labelMedium)
+                                        Text("%.1f ms".format(java.util.Locale.US,
+                                            if (testing) liveJitter else history.firstOrNull()?.jitter ?: jitter),
+                                            fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                val gaugeSpeed = if (testing) {
+                                    if (gaugeUpload) liveUploadMbps else liveDownloadMbps
+                                } else if (gaugeUpload) {
+                                    (history.firstOrNull()?.upload ?: upload).toFloat()
+                                } else {
+                                    (history.firstOrNull()?.download ?: download).toFloat()
+                                }
+                                SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = !gaugeUpload,
+                                        onClick = { if (!testing) gaugeUpload = false },
+                                        enabled = !testing,
+                                        modifier = Modifier.weight(1f),
+                                        label = { Text("↓  Download", fontWeight = FontWeight.SemiBold) }
+                                    )
+                                    FilterChip(
+                                        selected = gaugeUpload,
+                                        onClick = { if (!testing) gaugeUpload = true },
+                                        enabled = !testing,
+                                        modifier = Modifier.weight(1f),
+                                        label = { Text("↑  Upload", fontWeight = FontWeight.SemiBold) }
+                                    )
+                                }
+                                TextButton(onClick = { showExtendedMetrics = !showExtendedMetrics }) {
+                                    Icon(Icons.Default.Tune, null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (showExtendedMetrics) "Hide details" else "Detailed metrics")
+                                }
+                                if (showExtendedMetrics) {
+                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                     StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                                     StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                                 }
+                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                     StatTile("UPLOAD AVG", "%.1f".format(uploadAverage), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
+                                     StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
+                                 }
+                                 Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                 val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
+                                 if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                }
+
+                            }
+                        }
+                    }
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Card(
+                                onClick = { showServerPicker = !showServerPicker },
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                            ) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Icon(Icons.Default.NetworkCheck, null, tint = MaterialTheme.colorScheme.primary)
+                                    Text(netInfo.type, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                    Text(netInfo.frequency, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                            }
+                            Card(
+                                onClick = { showServerPicker = !showServerPicker },
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                            ) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary)
+                                    Text(selectedServer?.sponsor?.ifBlank { "Test Server" } ?: "Finding server…",
+                                        maxLines = 1, style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold)
+                                    Text(selectedServer?.city?.ifBlank { "Mauritius" } ?: "Tap to choose",
+                                        maxLines = 1, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                        TextButton(onClick = { showServerPicker = !showServerPicker }) {
+                            Text(if (showServerPicker) "Hide server selection" else "Change test server")
+                        }
+                    }
+                    item {
+                        val recent = history.firstOrNull()
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Latest Result", fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.titleMedium)
+                                    TextButton(onClick = { activeTab = 1 }) { Text("History ›") }
+                                }
+                                if (recent == null) {
+                                    Text("Run a speed test to see your first result.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                } else {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column {
+                                            Text("↓ Download", color = MaterialTheme.colorScheme.primary,
+                                                style = MaterialTheme.typography.labelSmall)
+                                            Text("%.1f Mbps".format(java.util.Locale.US, recent.download),
+                                                fontWeight = FontWeight.Bold)
+                                        }
+                                        Column {
+                                            Text("↑ Upload", color = MaterialTheme.colorScheme.tertiary,
+                                                style = MaterialTheme.typography.labelSmall)
+                                            Text("%.1f Mbps".format(java.util.Locale.US, recent.upload),
+                                                fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Ping  ${recent.ping} ms", style = MaterialTheme.typography.bodySmall)
+                                        Text("Jitter  %.1f ms".format(java.util.Locale.US, recent.jitter),
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Text(formatHistoryDate(recent.date),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Spacer(Modifier.height(18.dp))
+                                Button(onClick = {
+                                    if (!testing) {
+                                        gaugeRunId++; gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                                            logDiagnostic("========== SPEED TEST START ==========")
+                                        logDiagnostic("Server directory: Speedtest.net public API · country MU")
+                                        logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
+                                        logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
+                                        scope.launch {
+                                            try {
+                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), selectedServer, { server ->
+                                                    scope.launch {
+                                                        serverDetails = server
+                                                        prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
+                                                        val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(server.city, server.country) }
+                                                        val mapped = server.copy(latitude = coords?.first, longitude = coords?.second)
+                                                        serverDetails = mapped
+                                                        prefs.edit().putString("server_lat", mapped.latitude?.toString()).putString("server_lon", mapped.longitude?.toString()).apply()
+                                                    }
+                                                }, { phase, value, mbps ->
+                                                    status = phase; progress = value
+                                                    if (phase.contains("Upload", true)) {
+                                                        gaugeUpload = true
+                                                        liveUploadMbps = mbps.coerceAtLeast(0f)
+                                                    } else if (phase.contains("Download", true)) {
+                                                        gaugeUpload = false
+                                                        liveDownloadMbps = mbps.coerceAtLeast(0f)
+                                                    }
+                                                    if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                                    if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
+                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
+                                                download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
+                                                downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
+                                                serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
+                                                downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
+                                                loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
+                                                val connectionSnapshot = readNetworkInfo(context)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, connectionSnapshot.type, connectionSnapshot.connected, connectionSnapshot.signal, connectionSnapshot.quality, connectionSnapshot.link, connectionSnapshot.frequency, connectionSnapshot.note, serverDiscoveryStatus, serverDiscoveryMs)
+                                                history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
+                                                val arr = org.json.JSONArray()
+                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount).put("networkType", x.networkType).put("internetAvailable", x.internetAvailable).put("wifiSignal", x.wifiSignal).put("wifiQuality", x.wifiQuality).put("wifiLink", x.wifiLink).put("wifiFrequency", x.wifiFrequency).put("connectionNote", x.connectionNote).put("discoveryStatus", x.discoveryStatus).put("discoveryMs", x.discoveryMs)) }
+                                                prefs.edit().putString("history", arr.toString()).apply(); logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
+                                            } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                            finally { testing = false; gaugeUpload = false; progress = 1f; netInfo = readNetworkInfo(context) }
+                                        }
+                                    }
+                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
+                                if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
+                                error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                    if (showServerPicker || selectedServer == null) {
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
@@ -375,93 +589,6 @@ private fun SpeedTesterApp(context: Context) {
                             }
                         }
                     }
-                    item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-                                Spacer(Modifier.height(8.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("↓ DOWNLOAD", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium); Text("Mbps", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("↑ UPLOAD", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium); Text("Mbps", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(if (livePing >= 0) livePing.toString() else if (ping >= 0) ping.toString() else "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("PING", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium); Text("ms", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", liveJitter.takeIf { it > 0 } ?: jitter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("JITTER", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium); Text("ms", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                val chartMax = max(10f, (downloadSamples + uploadSamples).maxOrNull() ?: 10f)
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Column(Modifier.height(170.dp).width(34.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-                                        Text("${chartMax.toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .75f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .5f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .25f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("0", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.weight(1f).height(170.dp))
-                                }
-                                Row(Modifier.fillMaxWidth().padding(start = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Earlier samples", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                    Text("Latest sample →", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("━ Download · ${downloadSamples.size} samples", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                                    Text("━ Upload · ${uploadSamples.size} samples", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
-                                }
-                                Text("Vertical axis = Mbps. Samples update about every 250 ms; download and upload are measured in separate phases, so compare each coloured line within its own phase.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                     StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                                     StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                                 }
-                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                     StatTile("UPLOAD AVG", "%.1f".format(uploadAverage), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-                                     StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-                                 }
-                                 Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                 val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
-                                 if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(18.dp))
-                                Button(onClick = {
-                                    if (!testing) {
-                                        testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
-                                                            logDiagnostic("========== SPEED TEST START ==========")
-                                        logDiagnostic("Server directory: Speedtest.net public API · country MU")
-                                        logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
-                                        logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
-                                        scope.launch {
-                                            try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), selectedServer, { server ->
-                                                    scope.launch {
-                                                        serverDetails = server
-                                                        prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
-                                                        val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(server.city, server.country) }
-                                                        val mapped = server.copy(latitude = coords?.first, longitude = coords?.second)
-                                                        serverDetails = mapped
-                                                        prefs.edit().putString("server_lat", mapped.latitude?.toString()).putString("server_lon", mapped.longitude?.toString()).apply()
-                                                    }
-                                                }, { phase, value, mbps ->
-                                                    status = phase; progress = value
-                                                    if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
-                                                    if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
-                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
-                                                download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
-                                                downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
-                                                serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
-                                                downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
-                                                loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
-                                                val connectionSnapshot = readNetworkInfo(context)
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, connectionSnapshot.type, connectionSnapshot.connected, connectionSnapshot.signal, connectionSnapshot.quality, connectionSnapshot.link, connectionSnapshot.frequency, connectionSnapshot.note, serverDiscoveryStatus, serverDiscoveryMs)
-                                                history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
-                                                val arr = org.json.JSONArray()
-                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount).put("networkType", x.networkType).put("internetAvailable", x.internetAvailable).put("wifiSignal", x.wifiSignal).put("wifiQuality", x.wifiQuality).put("wifiLink", x.wifiLink).put("wifiFrequency", x.wifiFrequency).put("connectionNote", x.connectionNote).put("discoveryStatus", x.discoveryStatus).put("discoveryMs", x.discoveryMs)) }
-                                                prefs.edit().putString("history", arr.toString()).apply(); logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
-                                            } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
-                                            finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
-                                        }
-                                    }
-                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
-                                if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
-                                error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                            }
-                        }
                     }
                     item { Text("LIVE DIAGNOSTICS", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge) }
                     item {
@@ -743,19 +870,6 @@ private fun UpdateSectionCard(
     Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall); Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text(unit, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
 }
 @Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontWeight = FontWeight.Medium) } }
-@Composable private fun BandwidthChart(downloadSamples: List<Float>, uploadSamples: List<Float>, modifier: Modifier = Modifier) {
-    val scheme = MaterialTheme.colorScheme
-    Canvas(modifier.background(scheme.surfaceContainerLow).padding(8.dp)) {
-        val allSamples = downloadSamples + uploadSamples
-        val maxValue = max(10f, allSamples.maxOrNull() ?: 10f)
-        for (i in 0..4) {
-            val y = size.height * i / 4f
-            drawLine(scheme.outlineVariant, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
-        }
-        fun drawSeries(samples: List<Float>, color: Color) { if (samples.size < 2) return; val path = Path(); samples.forEachIndexed { i, value -> val x = size.width * i / (samples.size - 1).toFloat(); val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height; if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)); val last = samples.last(); drawCircle(color, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height)) }
-        drawSeries(downloadSamples, scheme.primary); drawSeries(uploadSamples, scheme.tertiary)
-    }
-}
 @Composable private fun StatTile(label: String, value: String, unit: String, tint: Color, modifier: Modifier = Modifier) {
     Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp)) {
