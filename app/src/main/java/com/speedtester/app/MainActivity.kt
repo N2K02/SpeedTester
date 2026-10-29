@@ -286,7 +286,8 @@ private fun SpeedTesterApp(context: Context) {
                     NavigationBarItem(
                         selected = false,
                         onClick = {
-                            // Cancel discovery and an active network speed test before closing.
+                            // Preserve an explicit cancellation event before stopping work.
+                            if (testing) logDiagnostic("SPEED_TEST_CANCELLED_BY_QUIT")
                             scope.cancel()
                             LiveUpdater.controller.cancel()
                             (context as? ComponentActivity)?.finishAndRemoveTask()
