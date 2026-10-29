@@ -221,6 +221,9 @@ private fun SpeedTesterApp(context: Context) {
     var gaugeRunId by remember { mutableIntStateOf(0) }
     var liveDownloadMbps by remember { mutableFloatStateOf(0f) }
     var liveUploadMbps by remember { mutableFloatStateOf(0f) }
+    // Completed phase rate remains visible while the other direction is measured.
+    var downloadPhaseMbps by remember { mutableStateOf<Double?>(null) }
+    var uploadPhaseMbps by remember { mutableStateOf<Double?>(null) }
     var showExtendedMetrics by remember { mutableStateOf(false) }
     var showServerPicker by remember { mutableStateOf(false) }
     var livePing by remember { mutableLongStateOf(-1L) }
@@ -415,6 +418,17 @@ private fun SpeedTesterApp(context: Context) {
                                 } else if (gaugeUpload) (history.firstOrNull()?.upload ?: upload).toFloat()
                                 else (history.firstOrNull()?.download ?: download).toFloat()
                                 SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)
+                                val lastFinished = history.firstOrNull()
+                                SpeedRateCards(
+                                    download = SpeedRatePresentation.shown(
+                                        testing, downloadPhaseMbps, liveDownloadMbps,
+                                        lastFinished?.download
+                                    ),
+                                    upload = SpeedRatePresentation.shown(
+                                        testing, uploadPhaseMbps, liveUploadMbps,
+                                        lastFinished?.upload
+                                    )
+                                )
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text("TCP ping", style = MaterialTheme.typography.labelSmall)
@@ -440,7 +454,7 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 Button(onClick = {
                                     if (!testing) {
-                                        gaugeRunId++; gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                        gaugeRunId++; gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; downloadPhaseMbps = null; uploadPhaseMbps = null; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                                             logDiagnostic("========== SPEED TEST START ==========")
                                         logDiagnostic("Server directory: Speedtest.net public API · country MU")
                                         logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
@@ -483,6 +497,9 @@ private fun SpeedTesterApp(context: Context) {
                                                     }
                                                     if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
+                                                }, { isUploadPhase, completedMbps ->
+                                                    if (isUploadPhase) uploadPhaseMbps = completedMbps
+                                                    else downloadPhaseMbps = completedMbps
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
@@ -1378,7 +1395,7 @@ private object SpeedEngine {
         }
     }
 
-    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onPhaseFinished: (Boolean, Double) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
         val server = selectedServer ?: error("Select a Mauritius Ookla-compatible server first")
         val rawUploadUri = java.net.URI(server.uploadUrl)
         // Ookla-hosted servers can advertise a provider alias whose TLS certificate is issued
@@ -1449,6 +1466,7 @@ private object SpeedEngine {
                 calls.remove(call)
             }
         }
+        onPhaseFinished(false, down.mbps)
         onLog("DOWNLOAD: bytes=${down.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, down.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, down.averageMbps) + " Mbps")
 
         onUpdate("Uploading · Ookla server", .55f, 0f)
@@ -1485,6 +1503,7 @@ private object SpeedEngine {
                 calls.remove(call)
             }
         }
+        onPhaseFinished(true, up.mbps)
         onLog("UPLOAD: bytes=${up.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, up.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, up.averageMbps) + " Mbps")
 
         onUpdate("Checking connection stability", .96f, 0f)

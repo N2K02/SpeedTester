@@ -4,9 +4,7 @@ import android.graphics.Paint
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.foundation.Canvas
+  import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -57,12 +55,7 @@ internal fun SpeedometerDial(
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
         label = "Speedometer needle angle"
     )
-    val animatedSpeed by animateFloatAsState(
-        targetValue = safeSpeed,
-        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
-        label = "Speedometer numeric readout"
-    )
-    val tint = if (isUpload) dialPurple else dialCyan
+     val tint = if (isUpload) dialPurple else dialCyan
     val outerTrack = MaterialTheme.colorScheme.surfaceContainerHighest
     val tickColor = MaterialTheme.colorScheme.onSurfaceVariant
     val labelColor = MaterialTheme.colorScheme.onSurface
@@ -70,7 +63,7 @@ internal fun SpeedometerDial(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(312.dp)
+            .height(268.dp)
             .semantics {
                 contentDescription = (if (isUpload) "Upload " else "Download ") +
                     String.format(Locale.US, "%.1f megabits per second", safeSpeed)
@@ -173,23 +166,6 @@ internal fun SpeedometerDial(
             drawCircle(Color(0xFF131C2E), radius = 7.dp.toPx(), center = center)
             drawCircle(tint, radius = 2.dp.toPx(), center = center)
         }
-        Column(
-            Modifier.align(Alignment.BottomCenter).padding(bottom = 0.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                if (isUpload) "↑  Upload" else "↓  Download",
-                color = tint,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                String.format(Locale.US, "%.1f", animatedSpeed),
-                color = labelColor,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.displayLarge
-            )
-            Text("Mbps", color = tickColor, style = MaterialTheme.typography.titleMedium)
-        }
+
     }
 }
