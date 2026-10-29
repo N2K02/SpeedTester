@@ -46,6 +46,19 @@ class SpeedTesterRedesignTest {
         assertTrue(SpeedHistoryCsv.export(listOf(source)).contains("\"'=HYPERLINK"))
     }
 
+    @Test fun nearbyWifiCardsExposeSsidAndBssidWithoutOpeningDetails() {
+        val p = listOf(File("app/src/main/java/com/speedtester/app"),
+            File("src/main/java/com/speedtester/app")).first { it.isDirectory }
+        val screen = File(p, "WifiAnalyzerScreen.kt").readText()
+        val listStart = screen.indexOf("WifiPanel.NETWORKS ->")
+        val listEnd = screen.indexOf("WifiPanel.BEST ->", listStart)
+        assertTrue(listStart >= 0 && listEnd > listStart)
+        val listUi = screen.substring(listStart, listEnd)
+        assertTrue(listUi.contains("Text(ap.ssid"))
+        assertTrue(listUi.contains("Text(\"BSSID: \" + ap.bssid.ifBlank"))
+        assertTrue(listUi.contains("Text(\"Ch \" + ap.channel"))
+    }
+
     @Test fun screenshotApprovedScreensPreserveNavigation() {
         val p = listOf(File("app/src/main/java/com/speedtester/app"),
             File("src/main/java/com/speedtester/app")).first { it.isDirectory }

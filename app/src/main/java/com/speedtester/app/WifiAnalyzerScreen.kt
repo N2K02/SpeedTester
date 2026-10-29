@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -300,7 +301,12 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
                                     Icon(Icons.Default.Wifi, null, tint = tint, modifier = Modifier.size(30.dp))
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(ap.ssid, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                        Text(ap.ssid, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis)
+                                        Text("BSSID: " + ap.bssid.ifBlank { "Unavailable" },
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis)
                                         Text("Ch " + ap.channel + " · " + ap.widthMhz + " MHz · " + ap.security,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             style = MaterialTheme.typography.bodySmall)
