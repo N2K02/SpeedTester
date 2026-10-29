@@ -140,8 +140,8 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
         }
     }
 
-    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        locationGranted = granted && hasFineLocation(context)
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        locationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true && hasFineLocation(context)
         locationOn = isLocationEnabled(context)
         if (locationGranted && locationOn) requestScan()
     }
@@ -257,7 +257,7 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
                 AnalyzerMessageCard(
                     "Allow precise location",
                     "Android requires precise location permission to read nearby Wi-Fi networks. SpeedTester does not upload scan results.",
-                    "Grant permission", onAction = { locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
+                    "Grant permission", onAction = { locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
                 )
             } else if (!locationOn) item {
                 AnalyzerMessageCard(
