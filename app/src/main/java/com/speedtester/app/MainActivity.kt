@@ -300,7 +300,6 @@ private fun SpeedTesterApp(context: Context) {
             when (activeTab) {
                 4 -> SpeedTesterLogsPage(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    onBack = { activeTab = 3 },
                 )
                 0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
                     item {
