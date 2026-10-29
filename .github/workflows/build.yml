@@ -43,6 +43,16 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Configure APK build channel
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "BUILD_VARIANT=Debug" >> "$GITHUB_ENV"
+            echo "APK_INPUT=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_VARIANT=Release" >> "$GITHUB_ENV"
+            echo "APK_INPUT=app/build/outputs/apk/release/app-release-unsigned.apk" >> "$GITHUB_ENV"
+          fi
+
       - name: Work out version and release notes
         env:
           REQUESTED: ${{ github.event.inputs.version }}
@@ -90,8 +100,8 @@ jobs:
       - name: Compile and test
         run: gradle --no-daemon testDebugUnitTest assembleDebug -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
-      - name: Build release APK
-        run: gradle --no-daemon assembleRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
+      - name: Build channel APK
+        run: gradle --no-daemon assemble$BUILD_VARIANT -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
       - name: Sign APK using MRadio signing pipeline
         env:
@@ -112,7 +122,7 @@ jobs:
             --ks "$K/old.keystore" --ks-pass env:OP --ks-key-alias androiddebugkey --key-pass env:OP \
             --next-signer --ks "$K/release.p12" --ks-pass env:RP --ks-key-alias release --key-pass env:RP \
             --lineage "$K/lineage" --rotation-min-sdk-version 28 \
-            --out "$APP-$VERSION.apk" app/build/outputs/apk/release/app-release-unsigned.apk
+            --out "$APP-$VERSION.apk" $APK_INPUT
           rm -rf "$K"
           "$BT/apksigner" verify --verbose --print-certs "$APP-$VERSION.apk" | grep -E "Signer.*(DN|SHA-256 digest)"
 
