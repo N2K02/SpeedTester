@@ -13,6 +13,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -28,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NetworkCheck
@@ -35,6 +39,10 @@ import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -59,6 +67,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -89,10 +99,10 @@ private fun formatHistoryDate(raw: String): String {
     }
 }
 
-data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0, val networkType: String = "Unknown", val internetAvailable: Boolean = false, val wifiSignal: String = "—", val wifiQuality: String = "—", val wifiLink: String = "—", val wifiFrequency: String = "—", val connectionNote: String = "", val discoveryStatus: String = "Not recorded", val discoveryMs: Long = -1L)
+data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0, val networkType: String = "Unknown", val internetAvailable: Boolean = false, val wifiSignal: String = "—", val wifiQuality: String = "—", val wifiLink: String = "—", val wifiFrequency: String = "—", val connectionNote: String = "", val discoveryStatus: String = "Not recorded", val discoveryMs: Long = -1L, val wifiSsid: String = "Unavailable", val wifiBssid: String = "Unavailable")
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); LiveUpdater.init(this); setContent { SpeedTesterApp(this) } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); LiveUpdater.init(this); AppLog.init(applicationContext); setContent { SpeedTesterApp(this) } }
     override fun onResume() { super.onResume(); LiveUpdater.onResume(this) }
 }
 
@@ -145,6 +155,9 @@ private fun SpeedTesterApp(context: Context) {
             candidate.copy(distanceKm = km)
         }
     }
+    val selectedServerLive = remember(serversWithDistance, selectedServer) {
+        ServerDirectoryLogic.selectedCurrent(serversWithDistance, selectedServer)
+    }
     val filteredServers = remember(serversWithDistance, serverSearch) {
         serversWithDistance.filter { candidate ->
             candidate.country.equals("MU", true) &&
@@ -187,13 +200,15 @@ private fun SpeedTesterApp(context: Context) {
     var showUpdateDetails by remember { mutableStateOf(false) }
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
-    val diagnosticLog = remember { mutableStateListOf<String>() }
-    var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            netInfo = readNetworkInfo(context)
-            kotlinx.coroutines.delay(2500)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // No periodic network polling while the Activity is in the background.
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                netInfo = readNetworkInfo(context)
+                kotlinx.coroutines.delay(2500)
+            }
         }
     }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
@@ -212,24 +227,46 @@ private fun SpeedTesterApp(context: Context) {
     var serverIp by remember { mutableStateOf("") }
     var dnsLookupMs by remember { mutableLongStateOf(-1L) }
     var loggedPhase by remember { mutableStateOf("") }
+    var gaugeUpload by remember { mutableStateOf(false) }
+    var gaugeRunId by remember { mutableIntStateOf(0) }
+    var liveDownloadMbps by remember { mutableFloatStateOf(0f) }
+    var liveUploadMbps by remember { mutableFloatStateOf(0f) }
+    // Completed phase rate remains visible while the other direction is measured.
+    var downloadPhaseMbps by remember { mutableStateOf<Double?>(null) }
+    var uploadPhaseMbps by remember { mutableStateOf<Double?>(null) }
+    var showExtendedMetrics by remember { mutableStateOf(false) }
+    var showServerPicker by remember { mutableStateOf(false) }
     var livePing by remember { mutableLongStateOf(-1L) }
     var liveJitter by remember { mutableDoubleStateOf(0.0) }
-    fun logDiagnostic(message: String) {
-        val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
-        diagnosticLog.add("$stamp  $message")
-        while (diagnosticLog.size > 500) diagnosticLog.removeAt(0)
-    }
+    // All detailed test diagnostics now use the standard opt-in persistent Logs page.
+    fun logDiagnostic(message: String) { AppLog.add("SPEED", message) }
     val downloadSamples = remember { mutableStateListOf<Float>() }
     val uploadSamples = remember { mutableStateListOf<Float>() }
     val history = remember {
         runCatching {
-            val arr = org.json.JSONArray(prefs.getString("history", "[]"))
-            (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
-                TestResult(o.optString("date"), o.optDouble("download"), o.optDouble("upload"), o.optLong("ping", -1), o.optDouble("jitter"), o.optString("server"), o.optDouble("downloadAverage", 0.0).finiteOrZero(), o.optDouble("downloadPeak", 0.0).finiteOrZero(), o.optDouble("uploadAverage", 0.0).finiteOrZero(), o.optDouble("uploadPeak", 0.0).finiteOrZero(), o.optLong("loadedPing", -1), o.optDouble("loadedJitter", 0.0).finiteOrZero(), o.optInt("failedProbes"), o.optInt("probeCount"), o.optString("networkType", "Unknown"), o.optBoolean("internetAvailable", false), o.optString("wifiSignal", "—"), o.optString("wifiQuality", "—"), o.optString("wifiLink", "—"), o.optString("wifiFrequency", "—"), o.optString("connectionNote", ""), o.optString("discoveryStatus", "Not recorded"), o.optLong("discoveryMs", -1))
-            }.toMutableStateList()
+            HistoryJsonCodec.decode(TestHistoryStore.read(context, prefs.getString("history", "[]")))
+                .toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
+    // The UI list is only modified once the durable AtomicFile write succeeds.
+    fun persistHistory(next: List<TestResult>): Boolean {
+        val ok = HistoryCommitPolicy.commit(next, { items ->
+            TestHistoryStore.write(context, HistoryJsonCodec.encode(items))
+        }, { items ->
+            history.clear()
+            history.addAll(items)
+        })
+        if (!ok) {
+            error = "Could not save history. Check device storage."
+            logDiagnostic("HISTORY_WRITE_FAILED")
+            android.widget.Toast.makeText(context, "Could not save history. Check device storage.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        return ok
+    }
+    var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
+    BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
+    BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
+    BackHandler(enabled = activeTab == 4 || activeTab == 5 || activeTab == 9) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -243,6 +280,12 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
+                                    activeTab == 8 -> Icons.Default.History
+                                    activeTab == 7 -> Icons.Default.NetworkCheck
+                                    activeTab == 6 -> Icons.Default.Bolt
+                                    activeTab == 5 -> Icons.Default.Wifi
+                                    activeTab == 9 -> Icons.Default.LocationOn
+                                    activeTab == 4 -> Icons.Rounded.Article
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
                                     activeTab == 2 -> Icons.Default.Timeline
@@ -254,6 +297,12 @@ private fun SpeedTesterApp(context: Context) {
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(when {
+                                activeTab == 8 -> "Test result"
+                                activeTab == 7 -> "Network Info"
+                                activeTab == 6 -> "Test Servers"
+                                activeTab == 5 -> "Wi-Fi Analyser"
+                                activeTab == 9 -> "Permissions"
+                                activeTab == 4 -> "Logs"
                                 activeTab == 3 && showUpdateDetails -> "About & updates"
                                 activeTab == 3 -> "Settings"
                                 activeTab == 2 -> "Server"
@@ -287,7 +336,8 @@ private fun SpeedTesterApp(context: Context) {
                     NavigationBarItem(
                         selected = false,
                         onClick = {
-                            // Cancel discovery and an active network speed test before closing.
+                            // Preserve an explicit cancellation event before stopping work.
+                            if (testing) logDiagnostic("SPEED_TEST_CANCELLED_BY_QUIT")
                             scope.cancel()
                             LiveUpdater.controller.cancel()
                             (context as? ComponentActivity)?.finishAndRemoveTask()
@@ -300,16 +350,304 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
-                0 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
+                5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
+                9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
+                4 -> SpeedTesterLogsPage(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                )
+                0 -> LazyColumn(
+                    Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
+                ) {
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Card(onClick = { activeTab = 6 },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Column(Modifier.fillMaxWidth().padding(15.dp),
+                                verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text("MAURITIUS TEST SERVERS", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                        Text("Ookla directory · Mauritius only · lowest latency first", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                        Text("Test Server", style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(selectedServerLive?.let { it.sponsor.ifBlank { "Ookla" } + " · " + it.city }
+                                            ?: "Finding Mauritius server…",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold, maxLines = 2)
+                                        Text("Mauritius · #" + (selectedServerLive?.serverId ?: "—"),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    TextButton(onClick = {
+                                    Text("Change ›", style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary)
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(selectedServerLive?.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) }
+                                        ?: "Distance —", style = MaterialTheme.typography.bodySmall)
+                                    Text(selectedServerLive?.latencyMs?.let { it.toString() + " ms TCP" }
+                                        ?: "Ping —", style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary)
+                                    Text("HTTPS", style = MaterialTheme.typography.bodySmall)
+                                }
+                                HorizontalDivider()
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Wifi, null, tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(19.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(if (netInfo.type == "Wi-Fi") "Wi-Fi · " + netInfo.ssid else netInfo.type,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                        if (netInfo.type == "Wi-Fi") {
+                                            Text("BSSID: " + netInfo.bssid,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1)
+                                            if (netInfo.ssid == "Unavailable" || netInfo.bssid == "Unavailable") {
+                                                TextButton(onClick = { activeTab = 9 }) {
+                                                    Text("Manage Wi-Fi permissions")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        Card(colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelMedium)
+                                val gaugeSpeed = if (testing) {
+                                    if (gaugeUpload) liveUploadMbps else liveDownloadMbps
+                                } else if (gaugeUpload) (history.firstOrNull()?.upload ?: upload).toFloat()
+                                else (history.firstOrNull()?.download ?: download).toFloat()
+                                SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)
+                                val lastFinished = history.firstOrNull()
+                                SpeedRateCards(
+                                    download = SpeedRatePresentation.shown(
+                                        testing, downloadPhaseMbps, liveDownloadMbps,
+                                        lastFinished?.download
+                                    ),
+                                    upload = SpeedRatePresentation.shown(
+                                        testing, uploadPhaseMbps, liveUploadMbps,
+                                        lastFinished?.upload
+                                    )
+                                )
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("TCP ping", style = MaterialTheme.typography.labelSmall)
+                                        val shownPing = if (testing && livePing >= 0) livePing
+                                            else if (ping >= 0) ping else history.firstOrNull()?.ping ?: -1
+                                        Text(if (shownPing >= 0) shownPing.toString() + " ms" else "—",
+                                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Jitter", style = MaterialTheme.typography.labelSmall)
+                                        Text("%.1f ms".format(java.util.Locale.US,
+                                            if (testing) liveJitter else history.firstOrNull()?.jitter ?: jitter),
+                                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Failed probes", style = MaterialTheme.typography.labelSmall)
+                                        Text(if (probeCount > 0) failedProbes.toString() + "/" + probeCount
+                                            else history.firstOrNull()?.let {
+                                                it.failedProbes.toString() + "/" + it.probeCount
+                                            } ?: "—", style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Button(onClick = {
+                                    if (!testing) {
+                                        gaugeRunId++; gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; downloadPhaseMbps = null; uploadPhaseMbps = null; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                                            logDiagnostic("========== SPEED TEST START ==========")
+                                        logDiagnostic("Server directory: Speedtest.net public API · country MU")
+                                        logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
+                                        logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
+                                        val testNetworkAtStart = readNetworkInfo(context)
+                                        val chosenServerAtStart = selectedServerLive
+                                        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                                        val networkAtStart = connectivity.activeNetwork
+                                        val changedDuringTest = java.util.concurrent.atomic.AtomicBoolean(false)
+                                        val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+                                            override fun onAvailable(network: android.net.Network) {
+                                                if (network != networkAtStart) changedDuringTest.set(true)
+                                            }
+                                            override fun onLost(network: android.net.Network) {
+                                                if (network == networkAtStart) changedDuringTest.set(true)
+                                            }
+                                        }
+                                        val watchingNetwork = runCatching {
+                                            connectivity.registerDefaultNetworkCallback(networkCallback)
+                                            true
+                                        }.getOrDefault(false)
+                                        scope.launch {
+                                            try {
+                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), chosenServerAtStart, { server ->
+                                                    scope.launch {
+                                                        serverDetails = server
+                                                        prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
+                                                        val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(server.city, server.country) }
+                                                        val mapped = server.copy(latitude = coords?.first, longitude = coords?.second)
+                                                        serverDetails = mapped
+                                                        prefs.edit().putString("server_lat", mapped.latitude?.toString()).putString("server_lon", mapped.longitude?.toString()).apply()
+                                                    }
+                                                }, { phase, value, mbps ->
+                                                    status = phase; progress = value
+                                                    if (phase.contains("Upload", true)) {
+                                                        gaugeUpload = true
+                                                        liveUploadMbps = mbps.coerceAtLeast(0f)
+                                                    } else if (phase.contains("Download", true)) {
+                                                        gaugeUpload = false
+                                                        liveDownloadMbps = mbps.coerceAtLeast(0f)
+                                                    }
+                                                    if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                                    if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
+                                                }, { isUploadPhase, completedMbps ->
+                                                    if (isUploadPhase) uploadPhaseMbps = completedMbps
+                                                    else downloadPhaseMbps = completedMbps
+                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
+                                                download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
+                                                downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
+                                                serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
+                                                downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
+                                                loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
+                                                val connectionSnapshot = readNetworkInfo(context)
+                                                val networkChanged = changedDuringTest.get() ||
+                                                    connectivity.activeNetwork != networkAtStart ||
+                                                    NetworkSnapshotPolicy.changed(
+                                                        testNetworkAtStart.type, connectionSnapshot.type,
+                                                        testNetworkAtStart.ssid, connectionSnapshot.ssid,
+                                                        testNetworkAtStart.bssid, connectionSnapshot.bssid
+                                                    )
+                                                if (networkChanged) {
+                                                    status = "Network changed — test not saved"
+                                                    error = "Connection changed during the test. Retry on a stable network."
+                                                    logDiagnostic("NETWORK_CHANGED_DURING_TEST — discarding mixed-network result")
+                                                    return@launch
+                                                }
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(chosenServerAtStart?.host.orEmpty(), chosenServerAtStart?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
+                                                if (!persistHistory((listOf(saved) + history).take(100))) {
+                                                    status = "Test complete — history not saved"
+                                                    return@launch
+                                                }
+ logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
+                                            } catch (e: Exception) { if (e is CancellationException) throw e; if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                            finally {
+                                                if (watchingNetwork) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+                                                testing = false; gaugeUpload = false; progress = 1f; netInfo = readNetworkInfo(context)
+                                            }
+                                        }
+                                    }
+                                }, enabled = !testing && selectedServerLive != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServerLive == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
+                                if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
+                                error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                            }
+                        }
+                    }
+                    item {
+                        val previous = history.firstOrNull()
+                        val details = HomeMetricsSnapshot(
+                            download = if (testing) liveDownloadMbps.toDouble()
+                                else previous?.download ?: download.takeIf { it > 0.0 },
+                            upload = if (testing) liveUploadMbps.toDouble()
+                                else previous?.upload ?: upload.takeIf { it > 0.0 },
+                            downloadAverage = if (testing) downloadAverage
+                                else previous?.downloadAverage,
+                            downloadPeak = if (testing) downloadPeak else previous?.downloadPeak,
+                            uploadAverage = if (testing) uploadAverage else previous?.uploadAverage,
+                            uploadPeak = if (testing) uploadPeak else previous?.uploadPeak,
+                            loadedPing = if (testing) loadedPing else previous?.loadedPing ?: loadedPing,
+                            loadedJitter = if (testing) loadedJitter else previous?.loadedJitter,
+                            network = netInfo.type,
+                            ssid = netInfo.ssid,
+                            bssid = netInfo.bssid,
+                            connected = netInfo.connected,
+                            signal = netInfo.signal,
+                            quality = netInfo.quality,
+                            linkSpeed = netInfo.link,
+                            frequency = netInfo.frequency,
+                            serverName = selectedServerLive?.sponsor?.ifBlank { "Ookla server" }
+                                ?: "No test server selected",
+                            serverHost = selectedServerLive?.host.orEmpty(),
+                            serverLocation = selectedServerLive?.city?.ifBlank { "Mauritius" }
+                                ?: "Mauritius"
+                        )
+                        HomeDetailedMetrics(
+                            expanded = showExtendedMetrics,
+                            onToggle = { showExtendedMetrics = !showExtendedMetrics },
+                            metrics = details
+                        )
+                    }
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HomeShortcut(Icons.Default.Wifi, "Wi-Fi Analyser", "Nearby networks",
+                                Color(0xFF9C65EE), { activeTab = 5 }, Modifier.weight(1f))
+                            HomeShortcut(Icons.Default.History, "Results", "Test history",
+                                Color(0xFFF36BA3), { activeTab = 1 }, Modifier.weight(1f))
+                        }
+                    }
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HomeShortcut(Icons.Default.Bolt, "Test Servers", "Mauritius servers",
+                                Color(0xFF38D19A), { activeTab = 6 }, Modifier.weight(1f))
+                            HomeShortcut(Icons.Default.NetworkCheck, "Network Info", "SSID and details",
+                                Color(0xFF8D9BB6), { activeTab = 7 }, Modifier.weight(1f))
+                        }
+                    }
+                }
+                1 -> SpeedTestHistoryScreen(
+                    history = history,
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    export = {
+
+                        val csv = SpeedHistoryCsv.export(history)
+                                val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }; val file = File(exportDir, "speedtester-history.csv"); file.writeText(csv)
+                                val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", file)
+                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/csv").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Export history"))
+                            
+                    },
+                    clear = {
+                        persistHistory(emptyList())
+                    },
+                    open = { result -> selectedHistory = result; activeTab = 8 }
+                )
+                8 -> {
+                    val result = selectedHistory
+                    if (result == null) {
+                        LaunchedEffect(Unit) { activeTab = 1 }
+                    } else {
+                        SpeedTestResultDetails(
+                            result = result,
+                            modifier = Modifier.fillMaxSize().padding(padding),
+                            back = { selectedHistory = null; activeTab = 1 },
+                            share = { shareTestResult(context, result) },
+                            delete = {
+                                val remaining = history.toMutableList().apply { remove(result) }
+                                if (persistHistory(remaining)) {
+                                    selectedHistory = null
+                                    activeTab = 1
+                                }
+                            }
+                        )
+                    }
+                }
+                6 -> SpeedServerDirectory(
+                    servers = serversWithDistance,
+                    selected = selectedServerLive,
+                    loading = serversLoading,
+                    error = serversError,
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    onSelect = { candidate ->
+                        if (!testing) { selectedServer = candidate; activeTab = 0 }
+                    },
+                    onRefresh = {
+
                                         scope.launch {
                                             serversLoading = true; serversError = ""; serverDiscoveryStatus = "Refreshing Mauritius server directory…"
                                             val discoveryStarted = System.nanoTime()
@@ -328,284 +666,39 @@ private fun SpeedTesterApp(context: Context) {
                                                 serverDiscoveryStatus = "Failed"
                                             } finally { serversLoading = false }
                                         }
-                                    }, enabled = !serversLoading && !testing) { Text("Refresh") }
-                                }
-                                Text("Live Ookla directory · Mauritius (MU) only · HTTPS-capable servers · ordered nearest to your last known location. The lowest-latency server is picked for you (or the one you used last); tap another to change it.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                OutlinedTextField(value = serverSearch, onValueChange = { serverSearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search provider, city, server ID") }, placeholder = { Text("e.g. my.t, Emtel, 4342") })
-                                Text("${filteredServers.size} HTTPS-compatible Mauritius server(s) found", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                if (serversLoading) { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()); Text("Finding Mauritius Ookla servers…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-                                if (serversError.isNotBlank()) Text(serversError, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
-                                if (!serversLoading && visibleServers.isEmpty()) Text("No compatible Mauritius servers found. Overseas servers are excluded. Check your connection and refresh the server list.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                visibleServers.forEach { candidate ->
-                                    val isSelected = selectedServer?.host == candidate.host
-                                    Card(
-                                        onClick = { if (!testing) selectedServer = candidate },
-                                        enabled = !testing,
-                                        colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
-                                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
-                                    ) {
-                                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            RadioButton(selected = isSelected, onClick = { if (!testing) selectedServer = candidate }, enabled = !testing)
-                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                                Text(candidate.label, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                                                Text(candidate.host, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                                Text(listOf(candidate.city, candidate.countryName).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Location not provided" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                                Text("Distance: ${candidate.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) } ?: "unknown"} · TCP latency: ${candidate.latencyMs?.let { "${it} ms" } ?: "unavailable"}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                                Text("Server ID: ${candidate.serverId.ifBlank { "unknown" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                            }
-                                            if (isSelected) Icon(Icons.Default.Bolt, contentDescription = "Selected server", tint = MaterialTheme.colorScheme.primary)
-                                        }
-                                    }
-                                }
-                                if (serverPageCount > 1) {
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                                        TextButton(onClick = { serverPage = (serverPage - 1).coerceAtLeast(0) }, enabled = serverPage > 0) { Text("Previous") }
-                                        Text("Page ${serverPage + 1} of ${serverPageCount}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-                                        TextButton(onClick = { serverPage = (serverPage + 1).coerceAtMost(serverPageCount - 1) }, enabled = serverPage < serverPageCount - 1) { Text("Next") }
-                                    }
-                                }
-                                Text(if (selectedServer == null) "Select a server to enable the speed test." else "Selected: ${selectedServer?.label}", color = if (selectedServer == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
+                                    
                     }
+                )
+                7 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
+                    contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-                                Spacer(Modifier.height(8.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", download), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("↓ DOWNLOAD", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium); Text("Mbps", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", upload), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("↑ UPLOAD", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelMedium); Text("Mbps", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(if (livePing >= 0) livePing.toString() else if (ping >= 0) ping.toString() else "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("PING", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium); Text("ms", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                    Column(Modifier.weight(0.7f), horizontalAlignment = Alignment.CenterHorizontally) { Text(String.format(java.util.Locale.US, "%.1f", liveJitter.takeIf { it > 0 } ?: jitter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Text("JITTER", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium); Text("ms", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                val chartMax = max(10f, (downloadSamples + uploadSamples).maxOrNull() ?: 10f)
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Column(Modifier.height(170.dp).width(34.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End) {
-                                        Text("${chartMax.toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .75f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .5f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${(chartMax * .25f).toInt()}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("0", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    BandwidthChart(downloadSamples.toList(), uploadSamples.toList(), Modifier.weight(1f).height(170.dp))
-                                }
-                                Row(Modifier.fillMaxWidth().padding(start = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Earlier samples", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                    Text("Latest sample →", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("━ Download · ${downloadSamples.size} samples", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                                    Text("━ Upload · ${uploadSamples.size} samples", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelSmall)
-                                }
-                                Text("Vertical axis = Mbps. Samples update about every 250 ms; download and upload are measured in separate phases, so compare each coloured line within its own phase.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                     StatTile("DOWNLOAD AVG", "%.1f".format(downloadAverage), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                                     StatTile("DOWNLOAD PEAK", "%.1f".format(downloadPeak), "Mbps", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                                 }
-                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                     StatTile("UPLOAD AVG", "%.1f".format(uploadAverage), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-                                     StatTile("UPLOAD PEAK", "%.1f".format(uploadPeak), "Mbps", MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-                                 }
-                                 Text("Stability · loaded ping " + (if (loadedPing >= 0) "$loadedPing ms" else "—") + " · jitter %.1f ms · failed probes %d/%d".format(loadedJitter, failedProbes, probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                 val quality = assessQuality(download, upload, ping, jitter, loadedPing, failedProbes, probeCount)
-                                 if (!testing && quality.score > 0) Text("Connection score ${quality.score}/100 · ${quality.label}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(18.dp))
-                                Button(onClick = {
-                                    if (!testing) {
-                                        testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
-                                        diagnosticLog.clear()
-                                        logDiagnostic("========== SPEED TEST START ==========")
-                                        logDiagnostic("Server directory: Speedtest.net public API · country MU")
-                                        logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
-                                        logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
-                                        scope.launch {
-                                            try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), selectedServer, { server ->
-                                                    scope.launch {
-                                                        serverDetails = server
-                                                        prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
-                                                        val coords = withContext(Dispatchers.IO) { ServerGeoLocator.locate(server.city, server.country) }
-                                                        val mapped = server.copy(latitude = coords?.first, longitude = coords?.second)
-                                                        serverDetails = mapped
-                                                        prefs.edit().putString("server_lat", mapped.latitude?.toString()).putString("server_lon", mapped.longitude?.toString()).apply()
-                                                    }
-                                                }, { phase, value, mbps ->
-                                                    status = phase; progress = value
-                                                    if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
-                                                    if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
-                                                }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
-                                                download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
-                                                downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
-                                                serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
-                                                downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
-                                                loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
-                                                val connectionSnapshot = readNetworkInfo(context)
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(serverDetails.host, serverDetails.location).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, connectionSnapshot.type, connectionSnapshot.connected, connectionSnapshot.signal, connectionSnapshot.quality, connectionSnapshot.link, connectionSnapshot.frequency, connectionSnapshot.note, serverDiscoveryStatus, serverDiscoveryMs)
-                                                history.add(0, saved); while (history.size > 100) history.removeAt(history.lastIndex)
-                                                val arr = org.json.JSONArray()
-                                                history.forEach { x -> arr.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount).put("networkType", x.networkType).put("internetAvailable", x.internetAvailable).put("wifiSignal", x.wifiSignal).put("wifiQuality", x.wifiQuality).put("wifiLink", x.wifiLink).put("wifiFrequency", x.wifiFrequency).put("connectionNote", x.connectionNote).put("discoveryStatus", x.discoveryStatus).put("discoveryMs", x.discoveryMs)) }
-                                                prefs.edit().putString("history", arr.toString()).apply(); logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
-                                            } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
-                                            finally { testing = false; progress = 1f; netInfo = readNetworkInfo(context) }
-                                        }
-                                    }
-                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START SPEED TEST", fontWeight = FontWeight.Bold) }
-                                if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
-                                error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                            }
-                        }
-                    }
-                    item { Text("LIVE DIAGNOSTICS", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge) }
-                    item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Timeline, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(8.dp)); Text("Latest activity", fontWeight = FontWeight.SemiBold) }
-                                Spacer(Modifier.height(8.dp))
-                                Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    activityLog.takeLast(8).forEach { line -> Text("• " + line, color = if (line.startsWith("ERROR")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-                                }
-                            }
-                        }
-                    }
-                    item { Text("CONNECTION", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge) }
-                    item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                InfoRow("Server discovery", if (serversLoading) "Discovering Mauritius servers…" else serverDiscoveryStatus)
-                                InfoRow("Discovery duration", if (serverDiscoveryMs >= 0) "%.2f s".format(java.util.Locale.US, serverDiscoveryMs / 1000.0) else "—")
-                                InfoRow("Test status", when { testing -> status; selectedServer != null -> "Ready · server selected"; serversLoading -> "Discovering…"; else -> "Select a Mauritius server" })
-                                InfoRow("Test server", selectedServer?.let { "${it.sponsor.ifBlank { "Ookla server" }} · ${it.host}" } ?: serverDetails.host.ifBlank { "Not selected yet" })
-                                InfoRow("Server location", selectedServer?.let { listOf(it.city, it.countryName).filter { part -> part.isNotBlank() }.joinToString(", ") }?.takeIf { it.isNotBlank() } ?: serverDetails.location.ifBlank { "Not available yet" })
-                                InfoRow("Selected-server TCP ping", if (ping >= 0) "$ping ms" else selectedServer?.latencyMs?.let { "$it ms (directory scan)" } ?: "Measured during test")
-                                Text("Discovery duration measures the Mauritius server-directory lookup. Ping is measured separately against the selected endpoint.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                InfoRow("Protocol", "Ookla-compatible HTTPS transfer")
+                        Card(colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Column(Modifier.fillMaxWidth().padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("Current Connection", style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold)
                                 InfoRow("Network", netInfo.type)
-                                InfoRow("Internet capability", if (netInfo.connected) "Available" else "Unavailable")
-                                InfoRow("Wi-Fi signal", netInfo.signal)
-                                InfoRow("Signal quality", netInfo.quality)
-                                InfoRow("Wi-Fi link speed", netInfo.link)
-                                InfoRow("Frequency / band", netInfo.frequency)
-                                InfoRow("Connection note", netInfo.note)
-                            }
-                        }
-                    }
-                    item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Timeline, null, tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Detailed diagnostic log", fontWeight = FontWeight.SemiBold)
-                                        Text("${diagnosticLog.size} entries · keeps latest 500 · shows latest 30", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    IconButton(onClick = { diagnosticLogExpanded = !diagnosticLogExpanded }) {
-                                        Icon(if (diagnosticLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (diagnosticLogExpanded) "Collapse diagnostic log" else "Expand diagnostic log", tint = MaterialTheme.colorScheme.primary)
-                                    }
-                                }
-                                if (diagnosticLogExpanded) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                                        TextButton(onClick = {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("SpeedTester diagnostic log", diagnosticLog.joinToString("\n")))
-                                        }) { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Copy") }
-                                        TextButton(onClick = { diagnosticLog.clear() }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear") }
-                                    }
-                                    Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        if (diagnosticLog.isEmpty()) Text("Log is empty. Start a test to capture detailed diagnostics.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                        diagnosticLog.takeLast(30).forEach { line ->
-                                            Text(line, color = if (line.contains("FATAL") || line.contains("HTTP 4") || line.contains("ERROR")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                if (netInfo.type == "Wi-Fi") {
+                                    InfoRow("Wi-Fi name (SSID)", netInfo.ssid)
+                                    InfoRow("Access point (BSSID)", netInfo.bssid)
+                                    InfoRow("Wi-Fi signal", netInfo.signal)
+                                    InfoRow("Signal quality", netInfo.quality)
+                                    InfoRow("Link speed", netInfo.link)
+                                    InfoRow("Frequency / band", netInfo.frequency)
+                                    if (netInfo.ssid == "Unavailable") {
+                                        Text("To display the network name, Android needs precise Location permission and enabled Location services.",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall)
+                                        TextButton(onClick = { activeTab = 9 }) {
+                                            Text("Open Permissions")
                                         }
                                     }
-                                    Text("Showing latest 8 lines. Copy exports the full in-memory log.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                 }
-                            }
-                        }
-                    }
-                }
-                1 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item { Text("Recent tests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                    item {
-                        Row {
-                            OutlinedButton(onClick = {
-                                val csv = buildString { append("date,download_mbps,upload_mbps,download_average_mbps,download_peak_mbps,upload_average_mbps,upload_peak_mbps,ping_ms,jitter_ms,loaded_ping_ms,loaded_jitter_ms,failed_tcp_probes,total_tcp_probes,server,network_type,internet_available,wifi_signal,wifi_quality,wifi_link_speed,wifi_frequency,connection_note,discovery_status,discovery_ms\n"); history.forEach { val safeServer = it.server.replace("\"", "\"\""); append("\"" + it.date + "\"," + it.download + "," + it.upload + "," + it.downloadAverage + "," + it.downloadPeak + "," + it.uploadAverage + "," + it.uploadPeak + "," + it.ping + "," + it.jitter + "," + it.loadedPing + "," + it.loadedJitter + "," + it.failedProbes + "," + it.probeCount + ",\"" + safeServer + "\",\"" + it.networkType + "\"," + it.internetAvailable + ",\"" + it.wifiSignal + "\",\"" + it.wifiQuality + "\",\"" + it.wifiLink + "\",\"" + it.wifiFrequency + "\",\"" + it.connectionNote.replace("\"", "\"\"") + "\",\"" + it.discoveryStatus + "\"," + it.discoveryMs + "\n") } }
-                                val file = File(context.cacheDir, "speedtester-history.csv"); file.writeText(csv)
-                                val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", file)
-                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/csv").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Export history"))
-                            }) { Text("Export CSV") }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = {
-                                history.clear()
-                                prefs.edit().putString("history", "[]").apply()
-                            }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear all history") }
-                        }
-                    }
-                    if (history.isEmpty()) item { Text("Your completed tests will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    items(history) { item ->
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(formatHistoryDate(item.date), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("DOWNLOAD", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                        Text("%.1f Mbps".format(item.download), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                        Text("Avg %.1f · Peak %.1f".format(item.downloadAverage, item.downloadPeak), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("UPLOAD", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                        Text("%.1f Mbps".format(item.upload), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                        Text("Avg %.1f · Peak %.1f".format(item.uploadAverage, item.uploadPeak), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Ping", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("${item.ping} ms", fontWeight = FontWeight.SemiBold)
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Jitter", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text("%.1f ms".format(item.jitter), fontWeight = FontWeight.SemiBold)
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Loaded ping", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                        Text(if (item.loadedPing >= 0) "${item.loadedPing} ms" else "—", fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                                Text("Loaded jitter %.1f ms  ·  Failed probes %d/%d".format(item.loadedJitter, item.failedProbes, item.probeCount), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                Text("Server", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                Text(item.server.ifBlank { "Server details unavailable" }, style = MaterialTheme.typography.bodySmall)
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.NetworkCheck, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("CONNECTION DETAILS", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                                }
-                                InfoRow("Network", item.networkType)
-                                InfoRow("Internet capability", if (item.internetAvailable) "Available" else "Unavailable")
-                                InfoRow("Wi-Fi signal", item.wifiSignal)
-                                InfoRow("Signal quality", item.wifiQuality)
-                                InfoRow("Wi-Fi link speed", item.wifiLink)
-                                InfoRow("Frequency / band", item.wifiFrequency)
-                                InfoRow("Connection note", item.connectionNote.ifBlank { "No additional note" })
-                                InfoRow("Server discovery", item.discoveryStatus)
-                                InfoRow("Discovery time", if (item.discoveryMs >= 0) "${item.discoveryMs} ms" else "—")
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = { shareTestResult(context, item) }) { Text("Share result") }
-                                    Spacer(Modifier.weight(1f))
-                                    TextButton(onClick = {
-                                        history.remove(item)
-                                        val updatedHistory = org.json.JSONArray()
-                                        history.forEach { x -> updatedHistory.put(JSONObject().put("date", x.date).put("download", x.download.finiteOrZero()).put("upload", x.upload.finiteOrZero()).put("ping", x.ping).put("jitter", x.jitter.finiteOrZero()).put("server", x.server).put("downloadAverage", x.downloadAverage.finiteOrZero()).put("downloadPeak", x.downloadPeak.finiteOrZero()).put("uploadAverage", x.uploadAverage.finiteOrZero()).put("uploadPeak", x.uploadPeak.finiteOrZero()).put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.finiteOrZero()).put("failedProbes", x.failedProbes).put("probeCount", x.probeCount).put("networkType", x.networkType).put("internetAvailable", x.internetAvailable).put("wifiSignal", x.wifiSignal).put("wifiQuality", x.wifiQuality).put("wifiLink", x.wifiLink).put("wifiFrequency", x.wifiFrequency).put("connectionNote", x.connectionNote).put("discoveryStatus", x.discoveryStatus).put("discoveryMs", x.discoveryMs)) }
-                                        prefs.edit().putString("history", updatedHistory.toString()).apply()
-                                    }) {
-                                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Delete", color = MaterialTheme.colorScheme.error)
-                                    }
-                                }
+                                InfoRow("Internet capability",
+                                    if (netInfo.connected) "Available" else "Unavailable")
+                                InfoRow("Connection note", netInfo.note)
                             }
                         }
                     }
@@ -683,6 +776,12 @@ private fun SpeedTesterApp(context: Context) {
                             modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 12.dp),
                         )
                         androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Permissions") },
+                            supportingContent = { Text("Wi-Fi scanning, precise location and Android access") },
+                            leadingContent = { Icon(Icons.Default.LocationOn, null) },
+                            modifier = Modifier.clickable { activeTab = 9; showUpdateDetails = false },
+                        )
+                        androidx.compose.material3.ListItem(
                             headlineContent = { Text("Test history") },
                             supportingContent = { Text("Previous speed tests and CSV export") },
                             leadingContent = { Icon(Icons.Default.History, null) },
@@ -701,7 +800,19 @@ private fun SpeedTesterApp(context: Context) {
                                 activeTab = 2
                             },
                         )
+                        ListItem(
+                            headlineContent = { Text("Wi-Fi Analyser") },
+                            supportingContent = { Text("Nearby networks, live graphs and channel recommendations") },
+                            leadingContent = { Icon(Icons.Default.Wifi, null) },
+                            modifier = Modifier.clickable { activeTab = 5; showUpdateDetails = false },
+                        )
                         HorizontalDivider()
+                        ListItem(
+                            headlineContent = { Text("Logs") },
+                            supportingContent = { Text("Private diagnostic and crash history") },
+                            leadingContent = { Icon(Icons.Rounded.Article, contentDescription = null) },
+                            modifier = Modifier.clickable { activeTab = 4; showUpdateDetails = false },
+                        )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
                             supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
@@ -756,18 +867,23 @@ private fun UpdateSectionCard(
 @Composable private fun Metric(label: String, value: String, unit: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall); Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge); Text(unit, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
 }
-@Composable private fun InfoRow(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontWeight = FontWeight.Medium) } }
-@Composable private fun BandwidthChart(downloadSamples: List<Float>, uploadSamples: List<Float>, modifier: Modifier = Modifier) {
-    val scheme = MaterialTheme.colorScheme
-    Canvas(modifier.background(scheme.surfaceContainerLow).padding(8.dp)) {
-        val allSamples = downloadSamples + uploadSamples
-        val maxValue = max(10f, allSamples.maxOrNull() ?: 10f)
-        for (i in 0..4) {
-            val y = size.height * i / 4f
-            drawLine(scheme.outlineVariant, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+@Composable
+private fun InfoRow(label: String, value: String) {
+    val verbose = value.length > 25 || label.length > 23
+    if (verbose) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyMedium)
         }
-        fun drawSeries(samples: List<Float>, color: Color) { if (samples.size < 2) return; val path = Path(); samples.forEachIndexed { i, value -> val x = size.width * i / (samples.size - 1).toFloat(); val y = size.height - (value / maxValue).coerceIn(0f, 1f) * size.height; if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)); val last = samples.last(); drawCircle(color, radius = 4.dp.toPx(), center = Offset(size.width, size.height - (last / maxValue).coerceIn(0f, 1f) * size.height)) }
-        drawSeries(downloadSamples, scheme.primary); drawSeries(uploadSamples, scheme.tertiary)
+    } else {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 @Composable private fun StatTile(label: String, value: String, unit: String, tint: Color, modifier: Modifier = Modifier) {
@@ -791,14 +907,14 @@ private fun shareTestResult(context: Context, item: TestResult) {
     }
     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shareText), "Share speed test result"))
 }
-private data class NetworkInfo(val type: String, val connected: Boolean, val signal: String, val quality: String, val link: String, val frequency: String, val note: String)
+private data class NetworkInfo(val type: String, val connected: Boolean, val signal: String, val quality: String, val link: String, val frequency: String, val note: String, val ssid: String, val bssid: String)
 @Suppress("DEPRECATION")
 private fun readNetworkInfo(context: Context): NetworkInfo {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
     val caps = cm.getNetworkCapabilities(cm.activeNetwork)
     val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
     // Prefer the active network's WifiInfo on modern Android; fall back for older releases.
-    val info = (caps?.transportInfo as? android.net.wifi.WifiInfo) ?: wifi.connectionInfo
+    val info = (caps?.transportInfo as? android.net.wifi.WifiInfo) ?: runCatching { wifi.connectionInfo }.getOrNull()
     val type = when {
         caps == null -> "Disconnected"
         caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
@@ -808,16 +924,33 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
         else -> "Other"
     }
     val isWifi = type == "Wi-Fi"
-    val freq = if (isWifi && info.frequency > 0) (if (info.frequency >= 5925) "6 GHz" else if (info.frequency >= 4900) "5 GHz" else "2.4 GHz") + " (" + info.frequency + " MHz)" else "—"
-    val hasWifiInfo = isWifi && info.rssi in -126..0
-    val rssi = if (hasWifiInfo) info.rssi else 0
+    val freq = if (isWifi && info != null && info.frequency > 0) (if (info.frequency >= 5925) "6 GHz" else if (info.frequency >= 4900) "5 GHz" else "2.4 GHz") + " (" + info.frequency + " MHz)" else "—"
+    val hasWifiInfo = isWifi && info?.rssi?.let { it in -126..0 } == true
+    val rssi = if (hasWifiInfo) info!!.rssi else 0
     val quality = when { !hasWifiInfo -> "Unavailable"; rssi >= -50 -> "Excellent"; rssi >= -60 -> "Very good"; rssi >= -67 -> "Good"; rssi >= -75 -> "Fair"; else -> "Weak" }
     val note = when {
         !isWifi -> "Wi-Fi is not the active network"
         !hasWifiInfo -> "Android is restricting Wi-Fi signal details; link speed and band may still be available"
         else -> "Signal is refreshed every 2.5 seconds; RSSI is an Android-reported estimate"
     }
-    return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note)
+    val allowedName = isWifi &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+        runCatching {
+            LocationManagerCompat.isLocationEnabled(context.getSystemService(Context.LOCATION_SERVICE) as LocationManager)
+        }.getOrDefault(false)
+    val direct = if (allowedName) runCatching { wifi.connectionInfo }.getOrNull() else null
+    val rawName = if (allowedName) listOf(info?.ssid, direct?.ssid)
+        .mapNotNull { it?.trim('"') }
+        .firstOrNull { it.isNotBlank() && !it.equals("<unknown ssid>", ignoreCase = true) }
+        .orEmpty() else ""
+    val ssid = rawName.takeIf { it.isNotBlank() && !it.equals("<unknown ssid>", true) } ?: "Unavailable"
+    val rawBssid = if (allowedName) listOf(info?.bssid, direct?.bssid)
+        .firstOrNull { !it.isNullOrBlank() &&
+            it != "02:00:00:00:00:00" && it != "00:00:00:00:00:00" }.orEmpty() else ""
+    val bssid = rawBssid.takeIf {
+        it.isNotBlank() && it != "02:00:00:00:00:00" && it != "00:00:00:00:00:00"
+    } ?: "Unavailable"
+    return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info != null && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note, ssid, bssid)
 }
 private data class ServerDetails(val host: String, val city: String, val country: String, val latitude: Double? = null, val longitude: Double? = null) {
     val location: String get() = listOf(city, country).filter { it.isNotBlank() && it != "null" }.joinToString(", ")
@@ -1015,13 +1148,13 @@ private fun assessQuality(download: Double, upload: Double, ping: Long, jitter: 
     val upScore = (upload / 50.0).coerceIn(0.0, 1.0) * 20.0
     val pingScore = if (ping < 0L) 0.0 else (1.0 - ((ping - 15L).coerceAtLeast(0L) / 185.0)).coerceIn(0.0, 1.0) * 20.0
     val jitterScore = (1.0 - (jitter / 50.0)).coerceIn(0.0, 1.0) * 10.0
-    val loadedScore = if (loadedPing < 0L || ping < 0L) 5.0 else (1.0 - ((loadedPing - ping).coerceAtLeast(0L) / 250.0)).coerceIn(0.0, 1.0) * 10.0
-    val stabilityScore = if (probes <= 0) 5.0 else ((probes - failed).coerceAtLeast(0).toDouble() / probes) * 5.0
+    val loadedScore = if (loadedPing < 0L || ping < 0L) 0.0 else (1.0 - ((loadedPing - ping).coerceAtLeast(0L) / 250.0)).coerceIn(0.0, 1.0) * 10.0
+    val stabilityScore = if (probes <= 0) 0.0 else ((probes - failed).coerceAtLeast(0).toDouble() / probes) * 5.0
     val score = (downScore + upScore + pingScore + jitterScore + loadedScore + stabilityScore).toInt().coerceIn(0, 100)
     val label = when { score >= 85 -> "Excellent"; score >= 70 -> "Very good"; score >= 50 -> "Good"; score >= 30 -> "Fair"; else -> "Needs attention" }
     return QualityAssessment(score, label, "A SpeedTester estimate based on speed, latency, jitter and stability—not an official Ookla result.")
 }
-private data class NdtServerCandidate(
+internal data class NdtServerCandidate(
     val host: String, val city: String, val country: String, val countryName: String,
     val downloadUrl: String, val uploadUrl: String,
     val latitude: Double? = null, val longitude: Double? = null,
@@ -1041,8 +1174,12 @@ private fun distanceKmBetween(originLat: Double, originLon: Double, lat: Double?
 private fun getLastKnownLocation(context: Context): Location? {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    // Do not use an arbitrary provider's first cached fix: it may be hours old.
+    val nowNanos = android.os.SystemClock.elapsedRealtimeNanos()
     return listOf(LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER, LocationManager.GPS_PROVIDER)
-        .firstNotNullOfOrNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .filter { LocationFixPolicy.isFresh(it.elapsedRealtimeNanos, nowNanos) }
+        .maxByOrNull { it.elapsedRealtimeNanos }
 }
 /**
  * Reports the device location: the last known fix immediately (if any), then a fresh fix from the
@@ -1149,83 +1286,131 @@ private object SpeedEngine {
     }
 
     /** Result of one direction: headline (after ramp-up), whole-phase average, peak, bytes and seconds. */
-    private data class Phase(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val seconds: Double)
+    private data class Phase(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val seconds: Double, val latency: List<Long>, val failedProbes: Int, val attemptedProbes: Int) {
+        val loadedPing: Long get() = latency.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: -1L
+        val loadedJitter: Double get() = if (latency.size < 2) 0.0 else latency.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
+    }
 
     /**
      * Runs [STREAMS] transfers in parallel for [TEST_SECONDS], reporting the combined rate about every
      * 250 ms. [transfer] performs one request; it adds to the counter as bytes move, and should stop
      * when the flag is set. Calls still running at the end are cancelled.
      */
+    /** Tracks acknowledged upload bytes and latency while data transfer is active. */
     private suspend fun runPhase(
-        label: String,
-        progressFrom: Float,
-        progressTo: Float,
-        onUpdate: (String, Float, Float) -> Unit,
-        onLog: (String) -> Unit,
-        transfer: (stop: java.util.concurrent.atomic.AtomicBoolean, counter: java.util.concurrent.atomic.AtomicLong, calls: MutableSet<okhttp3.Call>) -> Unit,
+        label: String, from: Float, to: Float, host: String, port: Int, verifyUpload: Boolean,
+        onUpdate: (String, Float, Float) -> Unit, onLog: (String) -> Unit,
+        transfer: (
+            stop: java.util.concurrent.atomic.AtomicBoolean,
+            sent: java.util.concurrent.atomic.AtomicLong,
+            acknowledged: java.util.concurrent.atomic.AtomicLong,
+            calls: MutableSet<okhttp3.Call>
+        ) -> Unit,
     ): Phase = kotlinx.coroutines.coroutineScope {
         val stop = java.util.concurrent.atomic.AtomicBoolean(false)
-        val bytes = java.util.concurrent.atomic.AtomicLong(0L)
-        val calls: MutableSet<okhttp3.Call> = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
-        val firstError = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
-        val workers = (1..STREAMS).map { stream ->
+        val sent = java.util.concurrent.atomic.AtomicLong()
+        val acknowledged = java.util.concurrent.atomic.AtomicLong()
+        val calls: MutableSet<okhttp3.Call> = java.util.Collections.newSetFromMap(
+            java.util.concurrent.ConcurrentHashMap<okhttp3.Call, Boolean>())
+        val sockets: MutableSet<Socket> = java.util.Collections.newSetFromMap(
+            java.util.concurrent.ConcurrentHashMap<Socket, Boolean>())
+        val failures = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val probeFailures = java.util.concurrent.atomic.AtomicInteger()
+        val probeAttempts = java.util.concurrent.atomic.AtomicInteger()
+        val latency = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        val workers = (1..STREAMS).map { n ->
             launch(Dispatchers.IO) {
-                var failures = 0
+                var retries = 0
                 while (!stop.get()) {
                     try {
-                        transfer(stop, bytes, calls)
-                        failures = 0
+                        transfer(stop, sent, acknowledged, calls)
+                        retries = 0
                     } catch (e: Exception) {
+                        if (e is CancellationException) throw e
                         if (stop.get()) break
-                        firstError.compareAndSet(null, e)
-                        onLog("$label stream $stream: ${e.javaClass.simpleName}: ${e.message ?: "no message"}")
-                        // A stream that keeps failing gives up; the others carry on.
-                        if (++failures >= 3) break
+                        failures.compareAndSet(null, e)
+                        onLog(label + " stream " + n + ": " + e.javaClass.simpleName)
+                        if (++retries >= 3) break
                         kotlinx.coroutines.delay(300)
                     }
                 }
             }
         }
-        val start = System.nanoTime()
-        val totalNanos = TimeUnit.SECONDS.toNanos(TEST_SECONDS)
-        var lastAt = start
-        var lastBytes = 0L
-        var peak = 0.0
-        var warmupBytes = -1L
-        var warmupAt = 0L
-        while (System.nanoTime() - start < totalNanos) {
-            kotlinx.coroutines.delay(250)
-            val now = System.nanoTime()
-            val total = bytes.get()
-            val instant = (total - lastBytes) * 8.0 / ((now - lastAt) / 1_000_000_000.0) / 1_000_000.0
-            if (warmupBytes < 0 && now - start >= TimeUnit.MILLISECONDS.toNanos(WARMUP_MS)) {
-                warmupBytes = total; warmupAt = now
+        val probeWorker = launch(Dispatchers.IO) {
+            repeat(7) {
+                kotlinx.coroutines.delay(350)
+                if (stop.get()) return@launch
+                val socket = Socket()
+                sockets.add(socket)
+                probeAttempts.incrementAndGet()
+                try {
+                    val started = System.nanoTime()
+                    socket.connect(java.net.InetSocketAddress(host, port), 1100)
+                    if (!stop.get()) latency.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    if (!stop.get()) probeFailures.incrementAndGet()
+                } finally {
+                    sockets.remove(socket)
+                    runCatching { socket.close() }
+                }
+                kotlinx.coroutines.delay(400)
             }
-            peak = maxOf(peak, instant)
-            val fraction = ((now - start).toDouble() / totalNanos).toFloat().coerceIn(0f, 1f)
-            onUpdate(label, progressFrom + (progressTo - progressFrom) * fraction, instant.toFloat())
-            lastAt = now; lastBytes = total
-            // Every stream gave up: stop early instead of waiting out the clock.
-            if (workers.all { it.isCompleted }) break
         }
-        stop.set(true)
-        calls.forEach { it.cancel() }
-        workers.forEach { it.join() }
-        val end = System.nanoTime()
-        val total = bytes.get()
-        if (total <= 0L) {
-            val cause = firstError.get()
-            error("$label: the server sent no data" + (cause?.let { " (${it.message ?: it.javaClass.simpleName})" } ?: ""))
+        try {
+            val start = System.nanoTime()
+            val duration = TimeUnit.SECONDS.toNanos(TEST_SECONDS)
+            var lastAt = start
+            var lastBytes = 0L
+            var peak = 0.0
+            var warmupBytes = -1L
+            var warmupAt = 0L
+            while (System.nanoTime() - start < duration) {
+                kotlinx.coroutines.delay(250)
+                val now = System.nanoTime()
+                val total = TransferAccounting.countableBytes(sent.get(), acknowledged.get(), verifyUpload)
+                val interval = ((now - lastAt) / 1_000_000_000.0).coerceAtLeast(.001)
+                val instant = (total - lastBytes).coerceAtLeast(0L) * 8.0 / interval / 1_000_000.0
+                if (warmupBytes < 0 && now - start >= TimeUnit.MILLISECONDS.toNanos(WARMUP_MS)) {
+                    warmupBytes = total
+                    warmupAt = now
+                }
+                peak = maxOf(peak, instant)
+                val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
+                onUpdate(label, from + (to - from) * fraction, instant.toFloat())
+                lastAt = now
+                lastBytes = total
+                if (workers.all { it.isCompleted }) break
+            }
+            stop.set(true)
+            calls.toList().forEach { it.cancel() }
+            sockets.toList().forEach { runCatching { it.close() } }
+            probeWorker.cancelAndJoin()
+            workers.forEach { it.join() }
+            val end = System.nanoTime()
+            val total = TransferAccounting.countableBytes(sent.get(), acknowledged.get(), verifyUpload)
+            if (total <= 0L) error(label + ": no server-accepted data; " +
+                (failures.get()?.javaClass?.simpleName ?: "no successful transfer"))
+            val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
+            val average = total * 8.0 / seconds / 1_000_000.0
+            val steady = if (warmupBytes >= 0L && end > warmupAt)
+                (total - warmupBytes).coerceAtLeast(0L) * 8.0 /
+                    ((end - warmupAt) / 1_000_000_000.0) / 1_000_000.0
+                else average
+            val samples = synchronized(latency) { latency.toList() }
+            onLog(label + " concurrent loaded latency probes: " + samples.size + "/" + probeAttempts.get())
+            Phase(steady, average, maxOf(peak, steady), total, seconds,
+                samples, probeFailures.get(), probeAttempts.get())
+        } finally {
+            stop.set(true)
+            calls.toList().forEach { it.cancel() }
+            sockets.toList().forEach { runCatching { it.close() } }
+            workers.forEach { it.cancel() }
+            probeWorker.cancel()
         }
-        val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
-        val average = total * 8.0 / seconds / 1_000_000.0
-        val steady = if (warmupBytes >= 0 && end > warmupAt) {
-            (total - warmupBytes) * 8.0 / ((end - warmupAt) / 1_000_000_000.0) / 1_000_000.0
-        } else average
-        Phase(steady, average, maxOf(peak, steady), total, seconds)
     }
 
-    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onPhaseFinished: (Boolean, Double) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
         val server = selectedServer ?: error("Select a Mauritius Ookla-compatible server first")
         val rawUploadUri = java.net.URI(server.uploadUrl)
         // Ookla-hosted servers can advertise a provider alias whose TLS certificate is issued
@@ -1275,7 +1460,7 @@ private object SpeedEngine {
         val downloadBase = java.net.URI(uploadEndpoint).let { u -> u.path.substringBeforeLast("/", "") + "/random4000x4000.jpg" }
         onLog("Download endpoint: " + java.net.URI(uploadUri.scheme, null, uploadUri.host, uploadUri.port, downloadBase, null, null))
         onUpdate("Downloading · Ookla server", .08f, 0f)
-        val down = runPhase("Downloading · Ookla server", .08f, .50f, onUpdate, onLog) { stop, counter, calls ->
+        val down = runPhase("Downloading · Ookla server", .08f, .50f, host, port, false, onUpdate, onLog) { stop, counter, accepted, calls ->
             val url = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, downloadBase, "nocache=" + System.nanoTime(), null).toString()
             val call = client.newCall(Request.Builder().url(url).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
             calls.add(call)
@@ -1296,19 +1481,20 @@ private object SpeedEngine {
                 calls.remove(call)
             }
         }
+        onPhaseFinished(false, down.mbps)
         onLog("DOWNLOAD: bytes=${down.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, down.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, down.averageMbps) + " Mbps")
 
         onUpdate("Uploading · Ookla server", .55f, 0f)
-        val payload = ByteArray(1024 * 1024).also { java.security.SecureRandom().nextBytes(it) }
-        val up = runPhase("Uploading · Ookla server", .55f, .95f, onUpdate, onLog) { stop, counter, calls ->
+        val payload = ByteArray(256 * 1024).also { java.security.SecureRandom().nextBytes(it) }
+        val up = runPhase("Uploading · Ookla server", .55f, .95f, host, port, true, onUpdate, onLog) { stop, counter, accepted, calls ->
             val nonce = java.util.UUID.randomUUID().toString()
             val requestUrl = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, uploadUri.path, "nocache=$nonce", null).toString()
-            // 4 MB per request, counted as it is written so partial requests at the end still count.
+            // A 256 KiB request enables acceptance-based throughput even on slower connections.
             val body = object : okhttp3.RequestBody() {
                 override fun contentType() = "application/octet-stream".toMediaType()
-                override fun contentLength() = 4L * payload.size
+                override fun contentLength() = payload.size.toLong()
                 override fun writeTo(sink: okio.BufferedSink) {
-                    repeat(4) {
+                    repeat(1) {
                         var offset = 0
                         while (offset < payload.size) {
                             if (stop.get()) throw java.io.IOException("Test time is up")
@@ -1324,28 +1510,26 @@ private object SpeedEngine {
             val call = client.newCall(Request.Builder().url(requestUrl).post(body).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
             calls.add(call)
             try {
-                call.execute().use { if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code) }
+                call.execute().use {
+                    if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code)
+                    accepted.addAndGet(payload.size.toLong())
+                }
             } finally {
                 calls.remove(call)
             }
         }
+        onPhaseFinished(true, up.mbps)
         onLog("UPLOAD: bytes=${up.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, up.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, up.averageMbps) + " Mbps")
 
         onUpdate("Checking connection stability", .96f, 0f)
-        val loaded = mutableListOf<Long>()
-        var failed = 0
-        repeat(5) {
-            try {
-                val t = System.nanoTime()
-                Socket().use { it.connect(java.net.InetSocketAddress(host, port), 1500) }
-                loaded.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t))
-            } catch (_: Exception) { failed++ }
-            kotlinx.coroutines.delay(100)
-        }
-        val loadedPing = if (loaded.isNotEmpty()) loaded.average().toLong() else -1L
-        val loadedJitter = if (loaded.size > 1) loaded.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0
+        val loadedPing = TransferAccounting.loadedPing(down.loadedPing, up.loadedPing)
+        val loadedJitter = TransferAccounting.loadedJitter(down.loadedJitter, up.loadedJitter)
+        val failed = down.failedProbes + up.failedProbes
+        val totalProbes = down.attemptedProbes + up.attemptedProbes
+        onLog("Concurrent loaded TCP latency: download=" + down.loadedPing + " ms, upload=" +
+            up.loadedPing + " ms; combined worst=" + loadedPing + " ms")
         onLog("Ookla-compatible server: " + server.host + " (" + locationName + ")")
         onUpdate("Complete", 1f, 0f)
-        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, 5, null, null, resolvedAddress, dnsLookupMs)
+        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, totalProbes, null, null, resolvedAddress, dnsLookupMs)
     }
 }

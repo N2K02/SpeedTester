@@ -12,13 +12,14 @@ android {
     compileSdk = 37
     defaultConfig {
         applicationId = "com.speedtester.app"
-        minSdk = 29
-        targetSdk = 35
+        minSdk = 26
+        targetSdk = 37
         versionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: appVersionCode
         versionName = appVersion + ((findProperty("appVersionSuffix") as String?) ?: "")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
+        getByName("debug") { versionNameSuffix = "-debug" }
         release {
             // CI signs the unsigned release APK using the encrypted MRadio signing material.
             isMinifyEnabled = true
