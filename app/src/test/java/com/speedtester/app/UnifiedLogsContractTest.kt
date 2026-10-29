@@ -37,4 +37,12 @@ class UnifiedLogsContractTest {
             LogEventOrdering.merge(saved, activity, "2026-10-29"))
     }
 
+    @Test fun activityLogsCoverStartStopAndFailures() {
+        val path = "app/src/main/java/com/speedtester/app/MainActivity.kt"
+        val activity = listOf(File(path), File("../$path")).first { it.isFile }.readText()
+        assertTrue(activity.contains("SPEED_TEST_CANCELLED_BY_QUIT"))
+        assertTrue(activity.contains("SPEED TEST SUCCESS"))
+        assertTrue(activity.contains("SPEED TEST START"))
+    }
+
 }
