@@ -152,6 +152,9 @@ private fun SpeedTesterApp(context: Context) {
             candidate.copy(distanceKm = km)
         }
     }
+    val selectedServerLive = remember(serversWithDistance, selectedServer) {
+        ServerDirectoryLogic.selectedCurrent(serversWithDistance, selectedServer)
+    }
     val filteredServers = remember(serversWithDistance, serverSearch) {
         serversWithDistance.filter { candidate ->
             candidate.country.equals("MU", true) &&
@@ -361,11 +364,11 @@ private fun SpeedTesterApp(context: Context) {
                                     Column(Modifier.weight(1f)) {
                                         Text("Test Server", style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text(selectedServer?.let { it.sponsor.ifBlank { "Ookla" } + " · " + it.city }
+                                        Text(selectedServerLive?.let { it.sponsor.ifBlank { "Ookla" } + " · " + it.city }
                                             ?: "Finding Mauritius server…",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold, maxLines = 2)
-                                        Text("Mauritius · #" + (selectedServer?.serverId ?: "—"),
+                                        Text("Mauritius · #" + (selectedServerLive?.serverId ?: "—"),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
@@ -373,9 +376,9 @@ private fun SpeedTesterApp(context: Context) {
                                         color = MaterialTheme.colorScheme.primary)
                                 }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(selectedServer?.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) }
+                                    Text(selectedServerLive?.distanceKm?.let { "%.1f km".format(java.util.Locale.US, it) }
                                         ?: "Distance —", style = MaterialTheme.typography.bodySmall)
-                                    Text(selectedServer?.latencyMs?.let { it.toString() + " ms TCP" }
+                                    Text(selectedServerLive?.latencyMs?.let { it.toString() + " ms TCP" }
                                         ?: "Ping —", style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary)
                                     Text("HTTPS", style = MaterialTheme.typography.bodySmall)
@@ -460,6 +463,7 @@ private fun SpeedTesterApp(context: Context) {
                                         logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
                                         val testNetworkAtStart = readNetworkInfo(context)
+                                        val chosenServerAtStart = selectedServerLive
                                         val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
                                         val networkAtStart = connectivity.activeNetwork
                                         val changedDuringTest = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -477,7 +481,7 @@ private fun SpeedTesterApp(context: Context) {
                                         }.getOrDefault(false)
                                         scope.launch {
                                             try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), selectedServer, { server ->
+                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), chosenServerAtStart, { server ->
                                                     scope.launch {
                                                         serverDetails = server
                                                         prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
@@ -520,7 +524,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     logDiagnostic("NETWORK_CHANGED_DURING_TEST — discarding mixed-network result")
                                                     return@launch
                                                 }
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(selectedServer?.host.orEmpty(), selectedServer?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(chosenServerAtStart?.host.orEmpty(), chosenServerAtStart?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
                                                 if (!persistHistory((listOf(saved) + history).take(100))) {
                                                     status = "Test complete — history not saved"
                                                     return@launch
@@ -533,7 +537,7 @@ private fun SpeedTesterApp(context: Context) {
                                             }
                                         }
                                     }
-                                }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
+                                }, enabled = !testing && selectedServerLive != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServerLive == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
                                 error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                             }
@@ -561,10 +565,10 @@ private fun SpeedTesterApp(context: Context) {
                             quality = netInfo.quality,
                             linkSpeed = netInfo.link,
                             frequency = netInfo.frequency,
-                            serverName = selectedServer?.sponsor?.ifBlank { "Ookla server" }
+                            serverName = selectedServerLive?.sponsor?.ifBlank { "Ookla server" }
                                 ?: "No test server selected",
-                            serverHost = selectedServer?.host.orEmpty(),
-                            serverLocation = selectedServer?.city?.ifBlank { "Mauritius" }
+                            serverHost = selectedServerLive?.host.orEmpty(),
+                            serverLocation = selectedServerLive?.city?.ifBlank { "Mauritius" }
                                 ?: "Mauritius"
                         )
                         HomeDetailedMetrics(
@@ -628,7 +632,7 @@ private fun SpeedTesterApp(context: Context) {
                 }
                 6 -> SpeedServerDirectory(
                     servers = serversWithDistance,
-                    selected = selectedServer,
+                    selected = selectedServerLive,
                     loading = serversLoading,
                     error = serversError,
                     modifier = Modifier.fillMaxSize().padding(padding),
@@ -1163,8 +1167,12 @@ private fun distanceKmBetween(originLat: Double, originLon: Double, lat: Double?
 private fun getLastKnownLocation(context: Context): Location? {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    // Do not use an arbitrary provider's first cached fix: it may be hours old.
+    val nowNanos = android.os.SystemClock.elapsedRealtimeNanos()
     return listOf(LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER, LocationManager.GPS_PROVIDER)
-        .firstNotNullOfOrNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .filter { LocationFixPolicy.isFresh(it.elapsedRealtimeNanos, nowNanos) }
+        .maxByOrNull { it.elapsedRealtimeNanos }
 }
 /**
  * Reports the device location: the last known fix immediately (if any), then a fresh fix from the

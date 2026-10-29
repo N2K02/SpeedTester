@@ -108,9 +108,26 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
     var lastUpdated by remember { mutableLongStateOf(0L) }
     var details by remember { mutableStateOf<WifiAccessPoint?>(null) }
 
-    fun readLatest(updated: Boolean) {
+    // Android settings can change while the Activity stays alive: reset revoked scan data on return.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        locationGranted = hasFineLocation(context)
         locationOn = isLocationEnabled(context)
-        if (!hasFineLocation(context) || !locationOn) return
+        if (!locationGranted || !locationOn) {
+            points = emptyList()
+            details = null
+            status = if (!locationGranted) "Precise location permission is required"
+                else "Turn on Location to scan Wi-Fi"
+        }
+    }
+
+    fun readLatest(updated: Boolean) {
+        locationGranted = hasFineLocation(context)
+        locationOn = isLocationEnabled(context)
+        if (!locationGranted || !locationOn) {
+            points = emptyList()
+            details = null
+            return
+        }
         try {
             val results = wifi.scanResults
             points = results.map(::asWifiPoint).filter { it.band != null }
@@ -136,7 +153,12 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
     fun requestScan() {
         locationGranted = hasFineLocation(context)
         locationOn = isLocationEnabled(context)
-        if (!locationGranted || !locationOn) return
+        if (!locationGranted || !locationOn) {
+            points = emptyList()
+            status = if (!locationGranted) "Precise location permission is required"
+                else "Turn on Location to scan Wi-Fi"
+            return
+        }
         if (!wifi.isWifiEnabled) {
             status = "Enable Wi-Fi to scan networks"
             return
@@ -174,7 +196,7 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
         )
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
-    LaunchedEffect(locationGranted, running, inForeground) {
+    LaunchedEffect(locationGranted, running, inForeground, locationOn) {
         if (WifiScanPolicy.shouldScan(locationGranted, running, inForeground, isLocationEnabled(context))) {
             requestScan()
             while (true) {

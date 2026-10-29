@@ -13,6 +13,15 @@ internal enum class ServerSortMode(val label: String) {
  * It does not claim to measure server throughput, server capacity, or provider quality.
  */
 internal object ServerDirectoryLogic {
+    /** Reuse fresh latency and distance for the selected host, not its original discovery snapshot. */
+    fun selectedCurrent(servers: List<NdtServerCandidate>, selected: NdtServerCandidate?): NdtServerCandidate? {
+        if (selected == null) return null
+        return servers.firstOrNull { candidate ->
+            (selected.serverId.isNotBlank() && candidate.serverId == selected.serverId) ||
+                candidate.host == selected.host
+        } ?: selected
+    }
+
     fun matches(server: NdtServerCandidate, search: String): Boolean {
         val query = search.trim()
         return query.isBlank() || listOf(
@@ -28,7 +37,7 @@ internal object ServerDirectoryLogic {
     }
 
     fun visible(servers: List<NdtServerCandidate>, query: String, mode: ServerSortMode): List<NdtServerCandidate> {
-        val matches = servers.filter { matches(it, query) }
+        val matches = servers.filter { this.matches(it, query) }
         val byLatency = compareBy<NdtServerCandidate> { it.latencyMs ?: Long.MAX_VALUE }
             .thenBy { it.distanceKm ?: Double.MAX_VALUE }.thenBy { it.serverId }.thenBy { it.host }
         val byDistance = compareBy<NdtServerCandidate> { it.distanceKm ?: Double.MAX_VALUE }

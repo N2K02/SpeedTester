@@ -47,6 +47,40 @@ class SpeedTesterDesignTest {
         assertEquals("ST", ServerDirectoryLogic.initials(""))
     }
 
+    @Test fun selectedServerUsesFreshDirectoryMeasurements() {
+        val old = candidate("1", "Mauritius Telecom Ltd", "Rose Hill", 151L, 4.2)
+        val latest = old.copy(latencyMs = 529L, distanceKm = 33.2)
+        val other = candidate("2", "Emtel Ltd", "Rodrigues", 550L, 594.7)
+        assertEquals(latest, ServerDirectoryLogic.selectedCurrent(listOf(other, latest), old))
+        assertEquals(old, ServerDirectoryLogic.selectedCurrent(emptyList(), old))
+        assertNull(ServerDirectoryLogic.selectedCurrent(listOf(latest), null))
+        val main = listOf(File("app/src/main/java/com/speedtester/app/MainActivity.kt"),
+            File("src/main/java/com/speedtester/app/MainActivity.kt")).first { it.isFile }.readText()
+        assertTrue(main.contains("selectedServerLive?.distanceKm"))
+        assertTrue(main.contains("selectedServerLive?.latencyMs"))
+        assertTrue(main.contains("val chosenServerAtStart = selectedServerLive"))
+    }
+
+    @Test fun staleLocationIsNeverUsedToSortServers() {
+        val now = java.util.concurrent.TimeUnit.MINUTES.toNanos(100)
+        assertTrue(LocationFixPolicy.isFresh(now - java.util.concurrent.TimeUnit.MINUTES.toNanos(1), now))
+        assertFalse(LocationFixPolicy.isFresh(now - java.util.concurrent.TimeUnit.HOURS.toNanos(1), now))
+        assertFalse(LocationFixPolicy.isFresh(now + 1, now))
+        assertFalse(LocationFixPolicy.isFresh(0, now))
+        val main = listOf(File("app/src/main/java/com/speedtester/app/MainActivity.kt"),
+            File("src/main/java/com/speedtester/app/MainActivity.kt")).first { it.isFile }.readText()
+        assertTrue(main.contains("LocationFixPolicy.isFresh(it.elapsedRealtimeNanos, nowNanos)"))
+        assertTrue(main.contains(".maxByOrNull { it.elapsedRealtimeNanos }"))
+    }
+
+    @Test fun wifiAnalyzerRechecksPermissionWhenReturningFromSettings() {
+        val source = listOf(File("app/src/main/java/com/speedtester/app/WifiAnalyzerScreen.kt"),
+            File("src/main/java/com/speedtester/app/WifiAnalyzerScreen.kt")).first { it.isFile }.readText()
+        assertTrue(source.contains("LifecycleEventEffect(Lifecycle.Event.ON_RESUME)"))
+        assertTrue(source.contains("points = emptyList()"))
+        assertTrue(source.contains("LaunchedEffect(locationGranted, running, inForeground, locationOn)"))
+    }
+
     @Test fun presentationKeepsGaugeAndUpdatesBothValuesWhileTesting() {
         val root = listOf(File("app/src/main/java/com/speedtester/app"),
             File("src/main/java/com/speedtester/app")).first { it.isDirectory }
