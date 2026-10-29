@@ -166,7 +166,7 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
         if (locationGranted && running) {
             requestScan()
             while (true) {
-                delay(45_000L) // Deliberately below Android's foreground scan-throttle frequency.
+                delay(30_000L) // Target a 30-second refresh; Android may still throttle and return cached results.
                 if (isLocationEnabled(context)) requestScan()
                 else { locationOn = false; status = "Turn on Location to scan Wi-Fi" }
             }
