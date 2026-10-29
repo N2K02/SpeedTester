@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NetworkCheck
@@ -239,7 +240,7 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
-                                    activeTab == 4 -> Icons.Default.Settings
+                                    activeTab == 4 -> Icons.Rounded.Article
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
                                     activeTab == 2 -> Icons.Default.Timeline
@@ -673,6 +674,7 @@ private fun SpeedTesterApp(context: Context) {
                         ListItem(
                             headlineContent = { Text("Logs") },
                             supportingContent = { Text("Private diagnostic and crash history") },
+                            leadingContent = { Icon(Icons.Rounded.Article, contentDescription = null) },
                             modifier = Modifier.clickable { activeTab = 4; showUpdateDetails = false },
                         )
                         androidx.compose.material3.ListItem(
