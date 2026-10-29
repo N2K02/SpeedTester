@@ -81,6 +81,16 @@ class SpeedTesterDesignTest {
         assertTrue(source.contains("LaunchedEffect(locationGranted, running, inForeground, locationOn)"))
     }
 
+    @Test fun networkStatusPollingStopsInBackgroundAndResumesInForeground() {
+        val main = listOf(File("app/src/main/java/com/speedtester/app/MainActivity.kt"),
+            File("src/main/java/com/speedtester/app/MainActivity.kt")).first { it.isFile }.readText()
+        assertTrue(main.contains("lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED)"))
+        assertTrue(main.contains("LaunchedEffect(lifecycleOwner)"))
+        assertTrue(main.contains("netInfo = readNetworkInfo(context)"))
+        assertTrue(main.contains("kotlinx.coroutines.delay(2500)"))
+        assertFalse(main.contains("LaunchedEffect(Unit) {\n        while (true) {\n            netInfo"))
+    }
+
     @Test fun presentationKeepsGaugeAndUpdatesBothValuesWhileTesting() {
         val root = listOf(File("app/src/main/java/com/speedtester/app"),
             File("src/main/java/com/speedtester/app")).first { it.isDirectory }

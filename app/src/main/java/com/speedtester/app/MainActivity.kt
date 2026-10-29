@@ -13,6 +13,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -198,10 +201,14 @@ private fun SpeedTesterApp(context: Context) {
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            netInfo = readNetworkInfo(context)
-            kotlinx.coroutines.delay(2500)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // No periodic network polling while the Activity is in the background.
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                netInfo = readNetworkInfo(context)
+                kotlinx.coroutines.delay(2500)
+            }
         }
     }
     var serverDetails by remember { mutableStateOf(ServerDetails(prefs.getString("server_host", "").orEmpty(), prefs.getString("server_city", "").orEmpty(), prefs.getString("server_country", "").orEmpty(), prefs.getString("server_lat", null)?.toDoubleOrNull(), prefs.getString("server_lon", null)?.toDoubleOrNull())) }
