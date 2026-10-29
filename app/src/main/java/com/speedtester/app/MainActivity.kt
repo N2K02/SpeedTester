@@ -92,7 +92,7 @@ private fun formatHistoryDate(raw: String): String {
 data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0, val networkType: String = "Unknown", val internetAvailable: Boolean = false, val wifiSignal: String = "—", val wifiQuality: String = "—", val wifiLink: String = "—", val wifiFrequency: String = "—", val connectionNote: String = "", val discoveryStatus: String = "Not recorded", val discoveryMs: Long = -1L)
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); LiveUpdater.init(this); setContent { SpeedTesterApp(this) } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); LiveUpdater.init(this); AppLog.init(applicationContext); setContent { SpeedTesterApp(this) } }
     override fun onResume() { super.onResume(); LiveUpdater.onResume(this) }
 }
 
@@ -187,8 +187,6 @@ private fun SpeedTesterApp(context: Context) {
     var showUpdateDetails by remember { mutableStateOf(false) }
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
-    val diagnosticLog = remember { mutableStateListOf<String>() }
-    var diagnosticLogExpanded by remember { mutableStateOf(false) }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -214,11 +212,8 @@ private fun SpeedTesterApp(context: Context) {
     var loggedPhase by remember { mutableStateOf("") }
     var livePing by remember { mutableLongStateOf(-1L) }
     var liveJitter by remember { mutableDoubleStateOf(0.0) }
-    fun logDiagnostic(message: String) {
-        val stamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
-        diagnosticLog.add("$stamp  $message")
-        while (diagnosticLog.size > 500) diagnosticLog.removeAt(0)
-    }
+    // All detailed test diagnostics now use the standard opt-in persistent Logs page.
+    fun logDiagnostic(message: String) { AppLog.add("SPEED", message) }
     val downloadSamples = remember { mutableStateListOf<Float>() }
     val uploadSamples = remember { mutableStateListOf<Float>() }
     val history = remember {
@@ -422,8 +417,7 @@ private fun SpeedTesterApp(context: Context) {
                                 Button(onClick = {
                                     if (!testing) {
                                         testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
-                                        diagnosticLog.clear()
-                                        logDiagnostic("========== SPEED TEST START ==========")
+                                                            logDiagnostic("========== SPEED TEST START ==========")
                                         logDiagnostic("Server directory: Speedtest.net public API · country MU")
                                         logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
@@ -498,39 +492,7 @@ private fun SpeedTesterApp(context: Context) {
                             }
                         }
                     }
-                    item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Timeline, null, tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Detailed diagnostic log", fontWeight = FontWeight.SemiBold)
-                                        Text("${diagnosticLog.size} entries · keeps latest 500 · shows latest 30", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    IconButton(onClick = { diagnosticLogExpanded = !diagnosticLogExpanded }) {
-                                        Icon(if (diagnosticLogExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (diagnosticLogExpanded) "Collapse diagnostic log" else "Expand diagnostic log", tint = MaterialTheme.colorScheme.primary)
-                                    }
-                                }
-                                if (diagnosticLogExpanded) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                                        TextButton(onClick = {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("SpeedTester diagnostic log", diagnosticLog.joinToString("\n")))
-                                        }) { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Copy") }
-                                        TextButton(onClick = { diagnosticLog.clear() }) { Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Clear") }
-                                    }
-                                    Column(Modifier.fillMaxWidth().heightIn(min = 40.dp, max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        if (diagnosticLog.isEmpty()) Text("Log is empty. Start a test to capture detailed diagnostics.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                        diagnosticLog.takeLast(30).forEach { line ->
-                                            Text(line, color = if (line.contains("FATAL") || line.contains("HTTP 4") || line.contains("ERROR")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                        }
-                                    }
-                                    Text("Showing latest 8 lines. Copy exports the full in-memory log.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
-                        }
-                    }
+
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     item { Text("Recent tests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }

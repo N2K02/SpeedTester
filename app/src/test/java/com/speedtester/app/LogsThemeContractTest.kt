@@ -13,10 +13,10 @@ class LogsThemeContractTest {
         assertTrue(ui.contains("SpeedTesterLogsPage("))
         assertFalse(ui.contains("LogsActivity::class.java"))
         assertFalse(logs.contains("class LogsActivity"))
-        assertTrue(logs.contains("maxHeight < 430.dp"))
-        assertTrue(logs.contains("Switch(checked = enabled"))
-        assertTrue(logs.contains("onClick = AppLog::clear"))
-        assertTrue(logs.contains("onClick = onBack"))
+        assertTrue(src("app/src/main/java/com/speedtester/app/UnifiedLogsPage.kt").contains("maxHeight < 430.dp"))
+        assertTrue(src("app/src/main/java/com/speedtester/app/UnifiedLogsPage.kt").contains("Switch(checked = enabled"))
+        assertTrue(src("app/src/main/java/com/speedtester/app/UnifiedLogsPage.kt").contains("AppLog.clear()"))
+        assertTrue(src("app/src/main/java/com/speedtester/app/UnifiedLogsPage.kt").contains("onClick = onBack"))
         assertFalse(manifest.contains("com.speedtester.app.LogsActivity"))
     }
 }
