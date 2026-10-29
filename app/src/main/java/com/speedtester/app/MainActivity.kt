@@ -702,6 +702,15 @@ private fun SpeedTesterApp(context: Context) {
                             },
                         )
                         HorizontalDivider()
+                        val logScreenContext = androidx.compose.ui.platform.LocalContext.current
+                        ListItem(
+                            headlineContent = { Text("Logs") },
+                            supportingContent = { Text("Private diagnostic and crash history") },
+                            modifier = Modifier.clickable {
+                                val app = logScreenContext
+                                app.startActivity(android.content.Intent(app, com.speedtester.app.LogsActivity::class.java))
+                            },
+                        )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
                             supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
