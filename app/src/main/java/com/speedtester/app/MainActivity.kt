@@ -387,16 +387,6 @@ private fun SpeedTesterApp(context: Context) {
                                 verticalArrangement = Arrangement.spacedBy(7.dp)) {
                                 Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.labelMedium)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(selected = !gaugeUpload,
-                                        onClick = { if (!testing) gaugeUpload = false },
-                                        enabled = !testing, label = { Text("↓ Download") },
-                                        modifier = Modifier.weight(1f))
-                                    FilterChip(selected = gaugeUpload,
-                                        onClick = { if (!testing) gaugeUpload = true },
-                                        enabled = !testing, label = { Text("↑ Upload") },
-                                        modifier = Modifier.weight(1f))
-                                }
                                 val gaugeSpeed = if (testing) {
                                     if (gaugeUpload) liveUploadMbps else liveDownloadMbps
                                 } else if (gaugeUpload) (history.firstOrNull()?.upload ?: upload).toFloat()
@@ -474,19 +464,42 @@ private fun SpeedTesterApp(context: Context) {
                                 }, enabled = !testing && selectedServer != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServer == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
                                 error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                                TextButton(onClick = { showExtendedMetrics = !showExtendedMetrics }) {
-                                    Text(if (showExtendedMetrics) "Hide detailed metrics" else "Detailed metrics")
-                                }
-                                if (showExtendedMetrics) {
-                                    Text("Download: average %.1f · peak %.1f Mbps".format(
-                                        java.util.Locale.US, downloadAverage, downloadPeak),
-                                        style = MaterialTheme.typography.bodySmall)
-                                    Text("Upload: average %.1f · peak %.1f Mbps".format(
-                                        java.util.Locale.US, uploadAverage, uploadPeak),
-                                        style = MaterialTheme.typography.bodySmall)
-                                }
                             }
                         }
+                    }
+                    item {
+                        val previous = history.firstOrNull()
+                        val details = HomeMetricsSnapshot(
+                            download = if (testing) liveDownloadMbps.toDouble()
+                                else previous?.download ?: download.takeIf { it > 0.0 },
+                            upload = if (testing) liveUploadMbps.toDouble()
+                                else previous?.upload ?: upload.takeIf { it > 0.0 },
+                            downloadAverage = if (testing) downloadAverage
+                                else previous?.downloadAverage,
+                            downloadPeak = if (testing) downloadPeak else previous?.downloadPeak,
+                            uploadAverage = if (testing) uploadAverage else previous?.uploadAverage,
+                            uploadPeak = if (testing) uploadPeak else previous?.uploadPeak,
+                            loadedPing = if (testing) loadedPing else previous?.loadedPing ?: loadedPing,
+                            loadedJitter = if (testing) loadedJitter else previous?.loadedJitter,
+                            network = netInfo.type,
+                            ssid = netInfo.ssid,
+                            bssid = netInfo.bssid,
+                            connected = netInfo.connected,
+                            signal = netInfo.signal,
+                            quality = netInfo.quality,
+                            linkSpeed = netInfo.link,
+                            frequency = netInfo.frequency,
+                            serverName = selectedServer?.sponsor?.ifBlank { "Ookla server" }
+                                ?: "No test server selected",
+                            serverHost = selectedServer?.host.orEmpty(),
+                            serverLocation = selectedServer?.city?.ifBlank { "Mauritius" }
+                                ?: "Mauritius"
+                        )
+                        HomeDetailedMetrics(
+                            expanded = showExtendedMetrics,
+                            onToggle = { showExtendedMetrics = !showExtendedMetrics },
+                            metrics = details
+                        )
                     }
                     item {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
