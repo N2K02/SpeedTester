@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -226,7 +227,7 @@ private fun SpeedTesterApp(context: Context) {
             }.toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
-    BackHandler(enabled = activeTab == 4) { activeTab = 3 }
+    BackHandler(enabled = activeTab == 4 || activeTab == 5) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -240,6 +241,7 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
+                                    activeTab == 5 -> Icons.Default.Wifi
                                     activeTab == 4 -> Icons.Rounded.Article
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
@@ -252,6 +254,7 @@ private fun SpeedTesterApp(context: Context) {
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(when {
+                                activeTab == 5 -> "Wi-Fi Analyser"
                                 activeTab == 4 -> "Logs"
                                 activeTab == 3 && showUpdateDetails -> "About & updates"
                                 activeTab == 3 -> "Settings"
@@ -300,6 +303,7 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
+                5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 4 -> SpeedTesterLogsPage(
                     modifier = Modifier.fillMaxSize().padding(padding),
                 )
@@ -670,6 +674,12 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 activeTab = 2
                             },
+                        )
+                        ListItem(
+                            headlineContent = { Text("Wi-Fi Analyser") },
+                            supportingContent = { Text("Nearby networks, live graphs and channel recommendations") },
+                            leadingContent = { Icon(Icons.Default.Wifi, null) },
+                            modifier = Modifier.clickable { activeTab = 5; showUpdateDetails = false },
                         )
                         HorizontalDivider()
                         ListItem(
