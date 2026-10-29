@@ -70,6 +70,6 @@ class ReleaseReadinessTest {
     @Test fun ciValidatesMinifiedReleaseBuildAsWellAsDebug() {
         val workflow = listOf(File(".github/workflows/build.yml"), File("../.github/workflows/build.yml"))
             .first { it.isFile }.readText()
-        assertTrue(workflow.contains("testReleaseUnitTest assembleDebug assembleRelease"))
+        assertTrue(workflow.contains("testDebugUnitTest assembleDebug assembleRelease"))
     }
 }

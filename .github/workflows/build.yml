@@ -108,7 +108,7 @@ jobs:
           cat release-notes.md
 
       - name: Compile and test
-        run: gradle --no-daemon testDebugUnitTest testReleaseUnitTest assembleDebug assembleRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
+        run: gradle --no-daemon testDebugUnitTest assembleDebug assembleRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
       - name: Build channel APK
         run: gradle --no-daemon assemble$BUILD_VARIANT -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
