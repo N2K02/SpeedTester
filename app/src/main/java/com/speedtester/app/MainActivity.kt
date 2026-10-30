@@ -958,6 +958,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val captivePortal = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
     val cell = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
     val carrier = runCatching { cell.networkOperatorName }.getOrDefault("").ifBlank { "Unknown carrier" }
+    val cellularSignal = runCatching { cell.signalStrength?.level?.let { "Signal level $it/4" } ?: "Signal unavailable" }.getOrDefault("Signal restricted by Android")
     val cellularType = runCatching {
         when (cell.dataNetworkType) {
             android.telephony.TelephonyManager.NETWORK_TYPE_LTE -> "LTE (4G)"
@@ -984,7 +985,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val note = when {
         captivePortal -> "Guest Wi-Fi sign-in required (captive portal)"
         !validated && caps != null -> "Internet not validated: guest sign-in, DNS, or network restrictions"
-        type == "Mobile data" -> "$carrier · $cellularType" + if (wifiAssociated) " · Wi-Fi associated; cellular is the active route" else ""
+        type == "Mobile data" -> "$carrier · $cellularType · $cellularSignal" + if (wifiAssociated) " · Wi-Fi associated; cellular is the active route" else ""
         !isWifi -> "Wi-Fi is not the active network"
         !hasWifiInfo -> "Android is restricting Wi-Fi signal details; link speed and band may still be available"
         else -> "Signal is refreshed every 2.5 seconds; RSSI is an Android-reported estimate"
