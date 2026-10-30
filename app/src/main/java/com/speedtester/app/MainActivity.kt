@@ -115,6 +115,7 @@ private fun SpeedTesterApp(context: Context) {
     var availableServers by remember { mutableStateOf<List<NdtServerCandidate>>(emptyList()) }
     var selectedServer by remember { mutableStateOf<NdtServerCandidate?>(null) }
     var serversLoading by remember { mutableStateOf(false) }
+    var lastRefresh by remember { mutableLongStateOf(0L) }
     var serversError by remember { mutableStateOf("") }
     var serverDiscoveryMs by remember { mutableLongStateOf(-1L) }
     var serverDiscoveryStatus by remember { mutableStateOf("Not started") }
@@ -138,6 +139,7 @@ private fun SpeedTesterApp(context: Context) {
         val discoveryStarted = System.nanoTime()
         try {
             availableServers = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
+            lastRefresh = android.os.SystemClock.elapsedRealtime()
             serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
             if (availableServers.isEmpty()) {
                 serversError = "No HTTPS-compatible Ookla test servers were found in Mauritius. Try Refresh; only country code MU is shown."
@@ -171,7 +173,7 @@ private fun SpeedTesterApp(context: Context) {
     // No server to pick by hand each launch: reuse last time's server if it's still listed,
     // otherwise take the one with the lowest latency (the list is sorted that way).
     LaunchedEffect(availableServers) {
-        if (selectedServer == null && availableServers.isNotEmpty()) {
+        if (availableServers.isNotEmpty() && (selectedServer == null || availableServers.none { it.serverId == selectedServer?.serverId && it.host == selectedServer?.host })) {
             val savedId = prefs.getString("selected_server_id", null)
             selectedServer = availableServers.firstOrNull { it.serverId.isNotBlank() && it.serverId == savedId }
                 ?: availableServers.first()
@@ -488,7 +490,18 @@ private fun SpeedTesterApp(context: Context) {
                                         }.getOrDefault(false)
                                         scope.launch {
                                             try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), chosenServerAtStart, { server ->
+                                                var candidate = chosenServerAtStart
+                                                 if (lastRefresh == 0L || android.os.SystemClock.elapsedRealtime() - lastRefresh > 900_000L) {
+                                                     val fresh = runCatching { withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() } }.getOrNull()
+                                                     if (!fresh.isNullOrEmpty()) {
+                                                         availableServers = fresh
+                                                         lastRefresh = android.os.SystemClock.elapsedRealtime()
+                                                         candidate = fresh.firstOrNull { it.serverId == candidate?.serverId && it.host == candidate?.host }
+                                                             ?: fresh.firstOrNull { it.latencyMs != null } ?: fresh.first()
+                                                         selectedServer = candidate
+                                                     }
+                                                 }
+                                                 suspend fun measure(serverCandidate: NdtServerCandidate): SpeedOutcome = SpeedEngine.run(endpoint.trim().trimEnd('/'), serverCandidate, { server ->
                                                     scope.launch {
                                                         serverDetails = server
                                                         prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
@@ -512,7 +525,29 @@ private fun SpeedTesterApp(context: Context) {
                                                     if (isUploadPhase) uploadPhaseMbps = completedMbps
                                                     else downloadPhaseMbps = completedMbps
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
-                                                download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
+                                                val original = candidate ?: error("No Mauritius server available")
+                                                 val result = try { measure(original) } catch (first: Exception) {
+                                                     if (first is CancellationException) throw first
+                                                     if (changedDuringTest.get() || connectivity.activeNetwork != networkAtStart) throw first
+                                                     logDiagnostic("SERVER_FAILURE " + original.serverId + ": " + first.javaClass.simpleName)
+                                                     status = "Refreshing failed server…"
+                                                     val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
+                                                     if (refreshed.isNotEmpty()) {
+                                                         availableServers = refreshed
+                                                         lastRefresh = android.os.SystemClock.elapsedRealtime()
+                                                     }
+                                                     val alternate = refreshed.firstOrNull { it.host != original.host && it.latencyMs != null }
+                                                         ?: refreshed.firstOrNull { it.host != original.host } ?: throw first
+                                                     downloadSamples.clear(); uploadSamples.clear()
+                                                     downloadAverage = 0.0; downloadPeak = 0.0
+                                                     uploadAverage = 0.0; uploadPeak = 0.0
+                                                     liveDownloadMbps = 0f; liveUploadMbps = 0f
+                                                     logDiagnostic("SERVER_FAILOVER " + original.serverId + " -> " + alternate.serverId)
+                                                     candidate = alternate
+                                                     selectedServer = alternate
+                                                     measure(alternate)
+                                                 }
+                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
                                                 serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
                                                 downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
@@ -531,7 +566,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     logDiagnostic("NETWORK_CHANGED_DURING_TEST — discarding mixed-network result")
                                                     return@launch
                                                 }
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(chosenServerAtStart?.host.orEmpty(), chosenServerAtStart?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(candidate?.host.orEmpty(), candidate?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
                                                 if (!persistHistory((listOf(saved) + history).take(100))) {
                                                     status = "Test complete — history not saved"
                                                     return@launch
@@ -659,7 +694,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     serversError = "No HTTPS-compatible Ookla servers were found in Mauritius. The directory may not currently list a local server."
                                                     serverDiscoveryStatus = "No compatible servers found"
                                                 } else serverDiscoveryStatus = "Complete · ${refreshed.size} Mauritius servers"
-                                                if (selectedServer != null && refreshed.none { it.host == selectedServer?.host }) selectedServer = null
+                                                if (refreshed.isNotEmpty() && refreshed.none { it.serverId == selectedServer?.serverId && it.host == selectedServer?.host }) selectedServer = refreshed.firstOrNull { it.latencyMs != null } ?: refreshed.first()
                                             } catch (e: Exception) {
                                                 serversError = e.message ?: "Server refresh failed"
                                                 serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
