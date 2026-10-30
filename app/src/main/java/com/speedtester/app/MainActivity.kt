@@ -731,9 +731,12 @@ private fun SpeedTesterApp(context: Context) {
                                         }
                                     }
                                 }
-                                InfoRow("Internet capability",
+                                InfoRow("Validated Internet",
                                     if (netInfo.connected) "Available" else "Unavailable")
                                 InfoRow("Connection note", netInfo.note)
+                                 if (netInfo.type == "Mobile data") {
+                                     Text("Exact LTE/5G and signal details may require Android phone permissions or carrier access.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                 }
                             }
                         }
                     }
@@ -950,6 +953,21 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
     // Prefer the active network's WifiInfo on modern Android; fall back for older releases.
     val info = (caps?.transportInfo as? android.net.wifi.WifiInfo) ?: runCatching { wifi.connectionInfo }.getOrNull()
+    val wifiAssociated = runCatching { wifi.connectionInfo?.networkId ?: -1 }.getOrDefault(-1) >= 0
+    val validated = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+    val captivePortal = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
+    val cell = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+    val carrier = runCatching { cell.networkOperatorName }.getOrDefault("").ifBlank { "Unknown carrier" }
+    val cellularType = runCatching {
+        when (cell.dataNetworkType) {
+            android.telephony.TelephonyManager.NETWORK_TYPE_LTE -> "LTE (4G)"
+            android.telephony.TelephonyManager.NETWORK_TYPE_NR -> "NR (5G)"
+            android.telephony.TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPA+"
+            android.telephony.TelephonyManager.NETWORK_TYPE_UMTS -> "UMTS (3G)"
+            android.telephony.TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE (2G)"
+            else -> "Unknown technology"
+        }
+    }.getOrDefault("Restricted by Android")
     val type = when {
         caps == null -> "Disconnected"
         caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
@@ -964,11 +982,14 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val rssi = if (hasWifiInfo) info!!.rssi else 0
     val quality = when { !hasWifiInfo -> "Unavailable"; rssi >= -50 -> "Excellent"; rssi >= -60 -> "Very good"; rssi >= -67 -> "Good"; rssi >= -75 -> "Fair"; else -> "Weak" }
     val note = when {
+        captivePortal -> "Guest Wi-Fi sign-in required (captive portal)"
+        !validated && caps != null -> "Internet not validated: guest sign-in, DNS, or network restrictions"
+        type == "Mobile data" -> "$carrier · $cellularType" + if (wifiAssociated) " · Wi-Fi associated; cellular is the active route" else ""
         !isWifi -> "Wi-Fi is not the active network"
         !hasWifiInfo -> "Android is restricting Wi-Fi signal details; link speed and band may still be available"
         else -> "Signal is refreshed every 2.5 seconds; RSSI is an Android-reported estimate"
     }
-    val allowedName = isWifi &&
+    val allowedName = (isWifi || wifiAssociated) &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
         runCatching {
             LocationManagerCompat.isLocationEnabled(context.getSystemService(Context.LOCATION_SERVICE) as LocationManager)
@@ -985,7 +1006,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val bssid = rawBssid.takeIf {
         it.isNotBlank() && it != "02:00:00:00:00:00" && it != "00:00:00:00:00:00"
     } ?: "Unavailable"
-    return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info != null && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note, ssid, bssid)
+    return NetworkInfo(type, validated, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info != null && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note, ssid, bssid)
 }
 private data class ServerDetails(val host: String, val city: String, val country: String, val latitude: Double? = null, val longitude: Double? = null) {
     val location: String get() = listOf(city, country).filter { it.isNotBlank() && it != "null" }.joinToString(", ")
