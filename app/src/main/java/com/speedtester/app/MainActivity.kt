@@ -115,6 +115,7 @@ private fun SpeedTesterApp(context: Context) {
     var availableServers by remember { mutableStateOf<List<NdtServerCandidate>>(emptyList()) }
     var selectedServer by remember { mutableStateOf<NdtServerCandidate?>(null) }
     var serversLoading by remember { mutableStateOf(false) }
+    var lastRefresh by remember { mutableLongStateOf(0L) }
     var serversError by remember { mutableStateOf("") }
     var serverDiscoveryMs by remember { mutableLongStateOf(-1L) }
     var serverDiscoveryStatus by remember { mutableStateOf("Not started") }
@@ -138,6 +139,7 @@ private fun SpeedTesterApp(context: Context) {
         val discoveryStarted = System.nanoTime()
         try {
             availableServers = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
+            lastRefresh = android.os.SystemClock.elapsedRealtime()
             serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
             if (availableServers.isEmpty()) {
                 serversError = "No HTTPS-compatible Ookla test servers were found in Mauritius. Try Refresh; only country code MU is shown."
@@ -171,7 +173,7 @@ private fun SpeedTesterApp(context: Context) {
     // No server to pick by hand each launch: reuse last time's server if it's still listed,
     // otherwise take the one with the lowest latency (the list is sorted that way).
     LaunchedEffect(availableServers) {
-        if (selectedServer == null && availableServers.isNotEmpty()) {
+        if (availableServers.isNotEmpty() && (selectedServer == null || availableServers.none { it.serverId == selectedServer?.serverId && it.host == selectedServer?.host })) {
             val savedId = prefs.getString("selected_server_id", null)
             selectedServer = availableServers.firstOrNull { it.serverId.isNotBlank() && it.serverId == savedId }
                 ?: availableServers.first()
@@ -488,7 +490,18 @@ private fun SpeedTesterApp(context: Context) {
                                         }.getOrDefault(false)
                                         scope.launch {
                                             try {
-                                                val result = SpeedEngine.run(endpoint.trim().trimEnd('/'), chosenServerAtStart, { server ->
+                                                var candidate = chosenServerAtStart
+                                                 if (lastRefresh == 0L || android.os.SystemClock.elapsedRealtime() - lastRefresh > 900_000L) {
+                                                     val fresh = runCatching { withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() } }.getOrNull()
+                                                     if (!fresh.isNullOrEmpty()) {
+                                                         availableServers = fresh
+                                                         lastRefresh = android.os.SystemClock.elapsedRealtime()
+                                                         candidate = fresh.firstOrNull { it.serverId == candidate?.serverId && it.host == candidate?.host }
+                                                             ?: fresh.firstOrNull { it.latencyMs != null } ?: fresh.first()
+                                                         selectedServer = candidate
+                                                     }
+                                                 }
+                                                 suspend fun measure(serverCandidate: NdtServerCandidate): SpeedOutcome = SpeedEngine.run(endpoint.trim().trimEnd('/'), serverCandidate, { server ->
                                                     scope.launch {
                                                         serverDetails = server
                                                         prefs.edit().putString("server_host", server.host).putString("server_city", server.city).putString("server_country", server.country).apply()
@@ -512,7 +525,29 @@ private fun SpeedTesterApp(context: Context) {
                                                     if (isUploadPhase) uploadPhaseMbps = completedMbps
                                                     else downloadPhaseMbps = completedMbps
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
-                                                download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
+                                                val original = candidate ?: error("No Mauritius server available")
+                                                 val result = try { measure(original) } catch (first: Exception) {
+                                                     if (first is CancellationException) throw first
+                                                     if (changedDuringTest.get() || connectivity.activeNetwork != networkAtStart) throw first
+                                                     logDiagnostic("SERVER_FAILURE " + original.serverId + ": " + first.javaClass.simpleName)
+                                                     status = "Refreshing failed server…"
+                                                     val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
+                                                     if (refreshed.isNotEmpty()) {
+                                                         availableServers = refreshed
+                                                         lastRefresh = android.os.SystemClock.elapsedRealtime()
+                                                     }
+                                                     val alternate = refreshed.firstOrNull { it.host != original.host && it.latencyMs != null }
+                                                         ?: refreshed.firstOrNull { it.host != original.host } ?: throw first
+                                                     downloadSamples.clear(); uploadSamples.clear()
+                                                     downloadAverage = 0.0; downloadPeak = 0.0
+                                                     uploadAverage = 0.0; uploadPeak = 0.0
+                                                     liveDownloadMbps = 0f; liveUploadMbps = 0f
+                                                     logDiagnostic("SERVER_FAILOVER " + original.serverId + " -> " + alternate.serverId)
+                                                     candidate = alternate
+                                                     selectedServer = alternate
+                                                     measure(alternate)
+                                                 }
+                                                 download = result.download; upload = result.upload; ping = result.ping; jitter = result.jitter
                                                 downloadTcp = result.downloadTcp; uploadTcp = result.uploadTcp
                                                 serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
                                                 downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
@@ -531,7 +566,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     logDiagnostic("NETWORK_CHANGED_DURING_TEST — discarding mixed-network result")
                                                     return@launch
                                                 }
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(chosenServerAtStart?.host.orEmpty(), chosenServerAtStart?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(candidate?.host.orEmpty(), candidate?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
                                                 if (!persistHistory((listOf(saved) + history).take(100))) {
                                                     status = "Test complete — history not saved"
                                                     return@launch
@@ -659,7 +694,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     serversError = "No HTTPS-compatible Ookla servers were found in Mauritius. The directory may not currently list a local server."
                                                     serverDiscoveryStatus = "No compatible servers found"
                                                 } else serverDiscoveryStatus = "Complete · ${refreshed.size} Mauritius servers"
-                                                if (selectedServer != null && refreshed.none { it.host == selectedServer?.host }) selectedServer = null
+                                                if (refreshed.isNotEmpty() && refreshed.none { it.serverId == selectedServer?.serverId && it.host == selectedServer?.host }) selectedServer = refreshed.firstOrNull { it.latencyMs != null } ?: refreshed.first()
                                             } catch (e: Exception) {
                                                 serversError = e.message ?: "Server refresh failed"
                                                 serverDiscoveryMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted)
@@ -696,9 +731,12 @@ private fun SpeedTesterApp(context: Context) {
                                         }
                                     }
                                 }
-                                InfoRow("Internet capability",
+                                InfoRow("Validated Internet",
                                     if (netInfo.connected) "Available" else "Unavailable")
                                 InfoRow("Connection note", netInfo.note)
+                                 if (netInfo.type == "Mobile data") {
+                                     Text("Exact LTE/5G and signal details may require Android phone permissions or carrier access.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                 }
                             }
                         }
                     }
@@ -915,6 +953,22 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
     // Prefer the active network's WifiInfo on modern Android; fall back for older releases.
     val info = (caps?.transportInfo as? android.net.wifi.WifiInfo) ?: runCatching { wifi.connectionInfo }.getOrNull()
+    val wifiAssociated = runCatching { wifi.connectionInfo?.networkId ?: -1 }.getOrDefault(-1) >= 0
+    val validated = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+    val captivePortal = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
+    val cell = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+    val carrier = runCatching { cell.networkOperatorName }.getOrDefault("").ifBlank { "Unknown carrier" }
+    val cellularSignal = runCatching { cell.signalStrength?.level?.let { "Signal level $it/4" } ?: "Signal unavailable" }.getOrDefault("Signal restricted by Android")
+    val cellularType = runCatching {
+        when (cell.dataNetworkType) {
+            android.telephony.TelephonyManager.NETWORK_TYPE_LTE -> "LTE (4G)"
+            android.telephony.TelephonyManager.NETWORK_TYPE_NR -> "NR (5G)"
+            android.telephony.TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPA+"
+            android.telephony.TelephonyManager.NETWORK_TYPE_UMTS -> "UMTS (3G)"
+            android.telephony.TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE (2G)"
+            else -> "Unknown technology"
+        }
+    }.getOrDefault("Restricted by Android")
     val type = when {
         caps == null -> "Disconnected"
         caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
@@ -929,11 +983,14 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val rssi = if (hasWifiInfo) info!!.rssi else 0
     val quality = when { !hasWifiInfo -> "Unavailable"; rssi >= -50 -> "Excellent"; rssi >= -60 -> "Very good"; rssi >= -67 -> "Good"; rssi >= -75 -> "Fair"; else -> "Weak" }
     val note = when {
+        captivePortal -> "Guest Wi-Fi sign-in required (captive portal)"
+        !validated && caps != null -> "Internet not validated: guest sign-in, DNS, or network restrictions"
+        type == "Mobile data" -> "$carrier · $cellularType · $cellularSignal" + if (wifiAssociated) " · Wi-Fi associated; cellular is the active route" else ""
         !isWifi -> "Wi-Fi is not the active network"
         !hasWifiInfo -> "Android is restricting Wi-Fi signal details; link speed and band may still be available"
         else -> "Signal is refreshed every 2.5 seconds; RSSI is an Android-reported estimate"
     }
-    val allowedName = isWifi &&
+    val allowedName = (isWifi || wifiAssociated) &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
         runCatching {
             LocationManagerCompat.isLocationEnabled(context.getSystemService(Context.LOCATION_SERVICE) as LocationManager)
@@ -950,7 +1007,7 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val bssid = rawBssid.takeIf {
         it.isNotBlank() && it != "02:00:00:00:00:00" && it != "00:00:00:00:00:00"
     } ?: "Unavailable"
-    return NetworkInfo(type, caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info != null && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note, ssid, bssid)
+    return NetworkInfo(type, validated, if (hasWifiInfo) "$rssi dBm" else "—", quality, if (isWifi && info != null && info.linkSpeed > 0) info.linkSpeed.toString() + " Mbps" else "—", freq, note, ssid, bssid)
 }
 private data class ServerDetails(val host: String, val city: String, val country: String, val latitude: Double? = null, val longitude: Double? = null) {
     val location: String get() = listOf(city, country).filter { it.isNotBlank() && it != "null" }.joinToString(", ")
