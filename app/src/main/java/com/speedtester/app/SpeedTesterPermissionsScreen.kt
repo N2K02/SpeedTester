@@ -23,7 +23,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 
 internal data class SpeedPermissionStatus(
     val precise: Boolean, val approximate: Boolean, val locationEnabled: Boolean,
-    val wifiState: Boolean, val networkState: Boolean, val internet: Boolean,
+    val wifiState: Boolean, val networkState: Boolean, val internet: Boolean, val phoneState: Boolean,
 ) {
     val wifiIdentityAvailable: Boolean get() = precise && locationEnabled
 }
@@ -40,7 +40,8 @@ internal fun readSpeedPermissions(context: Context): SpeedPermissionStatus =
         }.getOrDefault(false),
         wifiState = permissionGranted(context, Manifest.permission.ACCESS_WIFI_STATE),
         networkState = permissionGranted(context, Manifest.permission.ACCESS_NETWORK_STATE),
-        internet = permissionGranted(context, Manifest.permission.INTERNET)
+        internet = permissionGranted(context, Manifest.permission.INTERNET),
+        phoneState = permissionGranted(context, Manifest.permission.READ_PHONE_STATE)
     )
 
 @Composable
@@ -97,6 +98,9 @@ internal fun SpeedTesterPermissionsScreen(context: Context, modifier: Modifier =
         }
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                PermissionStatusRow("Phone state", status.phoneState, "Allow cellular network technology and signal details.")
+                Button(onClick = { request.launch(arrayOf(Manifest.permission.READ_PHONE_STATE)) }, enabled = !status.phoneState,
+                    modifier = Modifier.padding(horizontal = 16.dp)) { Text("Grant phone access") }
                 PermissionStatusRow("Wi-Fi state", status.wifiState, "Read Wi-Fi connection and signal information.")
                 PermissionStatusRow("Network state", status.networkState, "Detect connection changes during tests.")
                 PermissionStatusRow("Internet", status.internet, "Download and upload to selected test servers.")
