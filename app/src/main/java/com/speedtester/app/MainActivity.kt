@@ -268,7 +268,7 @@ private fun SpeedTesterApp(context: Context) {
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
     BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
-    BackHandler(enabled = activeTab == 4 || activeTab == 5 || activeTab == 9) { activeTab = 3 }
+    BackHandler(enabled = activeTab == 5 || activeTab == 9) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -287,7 +287,6 @@ private fun SpeedTesterApp(context: Context) {
                                     activeTab == 6 -> Icons.Default.Bolt
                                     activeTab == 5 -> Icons.Default.Wifi
                                     activeTab == 9 -> Icons.Default.LocationOn
-                                    activeTab == 4 -> Icons.Rounded.Article
                                     activeTab == 3 && showUpdateDetails -> Icons.Default.Update
                                     activeTab == 3 -> Icons.Default.Settings
                                     activeTab == 2 -> Icons.Default.Timeline
@@ -304,7 +303,6 @@ private fun SpeedTesterApp(context: Context) {
                                 activeTab == 6 -> "Test Servers"
                                 activeTab == 5 -> "Wi-Fi Analyser"
                                 activeTab == 9 -> "Permissions"
-                                activeTab == 4 -> "Logs"
                                 activeTab == 3 && showUpdateDetails -> "About & updates"
                                 activeTab == 3 -> "Settings"
                                 activeTab == 2 -> "Server"
@@ -354,9 +352,6 @@ private fun SpeedTesterApp(context: Context) {
             when (activeTab) {
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
-                4 -> SpeedTesterLogsPage(
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                )
                 0 -> LazyColumn(
                     Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -845,12 +840,7 @@ private fun SpeedTesterApp(context: Context) {
                             modifier = Modifier.clickable { activeTab = 5; showUpdateDetails = false },
                         )
                         HorizontalDivider()
-                        ListItem(
-                            headlineContent = { Text("Logs") },
-                            supportingContent = { Text("Private diagnostic and crash history") },
-                            leadingContent = { Icon(Icons.Rounded.Article, contentDescription = null) },
-                            modifier = Modifier.clickable { activeTab = 4; showUpdateDetails = false },
-                        )
+                        
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("About & updates") },
                             supportingContent = { Text(if (updateStatus.hasPendingUpdate()) "A new update is available" else "Version and update checks") },
