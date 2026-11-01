@@ -200,7 +200,7 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
         if (WifiScanPolicy.shouldScan(locationGranted, running, inForeground, isLocationEnabled(context))) {
             requestScan()
             while (true) {
-                delay(30_000L) // Android may throttle scans and return cached results.
+                delay(WifiScanPolicy.AUTO_SCAN_INTERVAL_MS) // Lower radio wakeups; manual Refresh remains immediate.
                 if (WifiScanPolicy.shouldScan(locationGranted, running, inForeground, isLocationEnabled(context))) {
                     requestScan()
                 } else {

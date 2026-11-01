@@ -33,7 +33,8 @@ class SpeedEngineRegressionTest {
         val wifi = File(root, "java/com/speedtester/app/WifiAnalyzerScreen.kt").readText()
         assertTrue(wifi.contains("RequestMultiplePermissions()"))
         assertTrue(wifi.contains("arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)"))
-        assertTrue(wifi.contains("delay(30_000L)"))
+        assertTrue(wifi.contains("delay(WifiScanPolicy.AUTO_SCAN_INTERVAL_MS)"))
+        assertEquals(60_000L, WifiScanPolicy.AUTO_SCAN_INTERVAL_MS)
     }
 
     @Test fun cancellationClosesActiveCallsAndSockets() {
