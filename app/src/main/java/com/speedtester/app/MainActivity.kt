@@ -266,6 +266,7 @@ private fun SpeedTesterApp(context: Context) {
         return ok
     }
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
+    BackHandler(enabled = activeTab == 10) { activeTab = 0 }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
     BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
     BackHandler(enabled = activeTab == 5 || activeTab == 9) { activeTab = 3 }
@@ -282,6 +283,7 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
+                                    activeTab == 10 -> Icons.Default.NetworkCheck
                                     activeTab == 8 -> Icons.Default.History
                                     activeTab == 7 -> Icons.Default.NetworkCheck
                                     activeTab == 6 -> Icons.Default.Bolt
@@ -298,6 +300,7 @@ private fun SpeedTesterApp(context: Context) {
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(when {
+                                activeTab == 10 -> "Network Quality"
                                 activeTab == 8 -> "Test result"
                                 activeTab == 7 -> "Network Info"
                                 activeTab == 6 -> "Test Servers"
@@ -350,6 +353,7 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
+                10 -> NetworkQualityPage(modifier = Modifier.fillMaxSize().padding(padding))
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 0 -> LazyColumn(
@@ -357,6 +361,20 @@ private fun SpeedTesterApp(context: Context) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
                 ) {
+                    item {
+                        Card(onClick = { activeTab = 10 },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.NetworkCheck, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Network Quality", style = MaterialTheme.typography.titleMedium)
+                                    Text("Check responsiveness and connection stability", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Text("Test ›", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
                     item {
                         Card(onClick = { activeTab = 6 },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
