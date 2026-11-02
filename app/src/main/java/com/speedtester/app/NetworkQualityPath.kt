@@ -16,7 +16,8 @@ object NetworkQualityPathLogic {
         report: QualityReport?,
         running: Boolean,
         stage: String,
-        internetResponded: Boolean? = null
+        internetResponded: Boolean? = null,
+        liveRealResults: List<RealProbeResult> = emptyList()
     ): List<QualityPathNode> {
         val connected = access.transport != "Disconnected"
         val accessState = if (connected) QualityPathState.SUCCESS else QualityPathState.FAILED
@@ -34,12 +35,16 @@ object NetworkQualityPathLogic {
                 QualityReportLogic.wifiBand(access.frequencyMhz)
             else -> "Connected"
         }
-        val gatewayProbe = report?.realTests?.firstOrNull { it.id == "gateway" }
-        val routeProbe = report?.realTests?.firstOrNull { it.id == "isp" }
+        val observed = report?.realTests ?: liveRealResults
+        val gatewayProbe = observed.firstOrNull { it.id == "gateway" }
+        val routeProbe = observed.firstOrNull { it.id == "isp" }
         val gatewayState = if (gatewayProbe?.state == RealProbeState.VERIFIED)
             QualityPathState.SUCCESS else QualityPathState.UNMEASURED
         val ispState = if (routeProbe?.state == RealProbeState.VERIFIED)
-            QualityPathState.SUCCESS else QualityPathState.UNMEASURED
+            QualityPathState.SUCCESS else if (running && stage.startsWith("ISP route"))
+            QualityPathState.TESTING else QualityPathState.UNMEASURED
+        val displayedGatewayState = if (gatewayState == QualityPathState.UNMEASURED &&
+            running && stage.startsWith("Gateway ICMP")) QualityPathState.TESTING else gatewayState
         val endpoint = report?.endpoints?.firstOrNull { it.service == "Internet" }
         val internetState = when {
             endpoint != null && endpoint.responded -> QualityPathState.SUCCESS
@@ -61,10 +66,12 @@ object NetworkQualityPathLogic {
             QualityPathNode("link", link, linkDetail, accessState),
             // A gateway route's presence is not evidence that the router was probed.
             QualityPathNode("gateway", "Gateway",
-                if (gatewayState == QualityPathState.SUCCESS) "ICMP reply"
-                else if (access.gateway != null) "Not verified" else "Unknown", gatewayState),
+                if (displayedGatewayState == QualityPathState.SUCCESS) "ICMP reply"
+                else if (displayedGatewayState == QualityPathState.TESTING) "Testing"
+                else if (access.gateway != null) "Not verified" else "Unknown", displayedGatewayState),
             QualityPathNode("isp", "ISP",
-                if (ispState == QualityPathState.SUCCESS) "TTL reply" else "Not verified", ispState),
+                if (ispState == QualityPathState.SUCCESS) "TTL reply"
+                else if (ispState == QualityPathState.TESTING) "Testing" else "Not verified", ispState),
             QualityPathNode("internet", "Internet", internetDetail, internetState)
         )
     }

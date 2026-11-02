@@ -73,6 +73,18 @@ class NetworkQualityPathLogicTest {
         assertEquals("TTL reply", nodes[3].detail)
     }
 
+    @Test fun liveHopResultsAndTestingStatesAreReal() {
+        val pending = NetworkQualityPathLogic.build(wifi, null, true, "Gateway ICMP")
+        assertEquals(QualityPathState.TESTING, pending[2].state)
+        val isp = NetworkQualityPathLogic.build(wifi, null, true, "ISP route")
+        assertEquals(QualityPathState.TESTING, isp[3].state)
+        val observed = listOf(RealProbeResult("gateway", "Gateway ICMP",
+            RealProbeState.VERIFIED, "ICMP reply"))
+        val live = NetworkQualityPathLogic.build(wifi, null, true, "ISP route",
+            liveRealResults = observed)
+        assertEquals(QualityPathState.SUCCESS, live[2].state)
+    }
+
     @Test fun mobileTransportDoesNotInventWifiDetails() {
         val mobile = QualityAccess("Mobile data", null, null, null, true)
         val nodes = NetworkQualityPathLogic.build(mobile, null, false, "Ready")

@@ -91,6 +91,7 @@ object RealVideoProbe {
         var height = 0
         var droppedFrames = 0
         var rendered = false
+        var startupMs: Long? = null
         var rebufferSince = 0L
         var rebufferMs = 0L
         var playerError: String? = null
@@ -110,6 +111,7 @@ object RealVideoProbe {
             override fun onRenderedFirstFrame(
                 eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long
             ) {
+                if (!rendered) startupMs = SystemClock.elapsedRealtime() - start
                 rendered = true
             }
         }
@@ -147,7 +149,9 @@ object RealVideoProbe {
             val measured = RealProbeAnalysis.video(width, height, rendered,
                 player.currentPosition.coerceAtLeast(0), droppedFrames, rebufferMs, elapsed)
             measured.copy(
-                detail = measured.detail + " · media bytes ${bytes.get()}/$MAX_VIDEO_BYTES" +
+                detail = measured.detail +
+                    (startupMs?.let { " · first frame in $it ms" } ?: "") +
+                    " · media bytes ${bytes.get()}/$MAX_VIDEO_BYTES" +
                     (playerError?.let { " · player error $it" } ?: "")
             )
         } catch (cancelled: CancellationException) {

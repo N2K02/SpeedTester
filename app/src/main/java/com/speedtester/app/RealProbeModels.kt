@@ -36,7 +36,7 @@ object RealProbeAnalysis {
         width: Int, height: Int, rendered: Boolean, playedMs: Long, droppedFrames: Int,
         rebufferMs: Long, durationMs: Long
     ): RealProbeResult {
-        if (!rendered || playedMs < 3_000L) {
+        if (!rendered || playedMs < 6_000L) {
             return RealProbeResult("video", "4K playback", RealProbeState.UNAVAILABLE,
                 "Real video playback was not established; no 4K result claimed.")
         }

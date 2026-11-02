@@ -72,6 +72,7 @@ object NetworkQualityRunner {
         profile: QualityProfile,
         onProgress: suspend (stage: String, completed: Int, total: Int) -> Unit = { _, _, _ -> },
         onInternetCheck: suspend (responded: Boolean) -> Unit = {},
+        onRealResult: suspend (result: RealProbeResult) -> Unit = {},
         realConfig: RealProbeConfig = RealProbeConfig(),
         videoPreview: PlayerView? = null
     ): QualityReport {
@@ -221,6 +222,7 @@ object NetworkQualityRunner {
                     checkNetwork()
                     val result = RealNetworkProbes.measure(block)
                     realTests.add(result)
+                    onRealResult(result)
                     completed++
                     onProgress(title, completed, total)
                     checkNetwork()

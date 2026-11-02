@@ -83,6 +83,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         onDispose { videoPreview.player = null }
     }
     var internetResponded by remember { mutableStateOf<Boolean?>(null) }
+    var liveRealResults by remember { mutableStateOf<List<RealProbeResult>>(emptyList()) }
     var access by remember { mutableStateOf(NetworkQualityRunner.access(context)) }
     var running by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -100,6 +101,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     job?.cancel()
                     report = null
                     internetResponded = null
+                    liveRealResults = emptyList()
                     access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
                     failure = "Network changed. Run a new test."
                 }
@@ -135,6 +137,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
             failure = null
             report = null  // A different network may now be selected; never show a previous quality grade.
             internetResponded = null
+            liveRealResults = emptyList()
             access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
             job = scope.launch {
                 try {
@@ -145,6 +148,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                             progress = done.toFloat() / total.coerceAtLeast(1)
                         },
                         onInternetCheck = { observed -> internetResponded = observed },
+                        onRealResult = { measured -> liveRealResults = liveRealResults + measured },
                         realConfig = RealProbeConfig(
                             enabled = realEnabled,
                             udpHost = udpHost.trim(),
@@ -188,7 +192,9 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         }
     }
     val score = report?.score
-    val path = NetworkQualityPathLogic.build(access, report, running, stage, internetResponded)
+    val path = NetworkQualityPathLogic.build(
+        access, report, running, stage, internetResponded, liveRealResults
+    )
     val measuredEndpoints = report?.endpoints.orEmpty()
     val findings = report?.let { QualityScenarioLogic.evaluate(it) }.orEmpty()
     var expandedDiagnostics by remember { mutableStateOf(false) }
