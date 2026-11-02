@@ -52,7 +52,8 @@ data class QualityReport(
     val processCpuMs: Long? = null,
     val appTrafficBytes: Long? = null,
     val dnsLookupMs: Long? = null,
-    val tlsHandshakeMs: Long? = null
+    val tlsHandshakeMs: Long? = null,
+    val realTests: List<RealProbeResult> = emptyList()
 )
 
 object QualityReportLogic {

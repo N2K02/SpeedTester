@@ -21,6 +21,7 @@ import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import androidx.media3.ui.PlayerView
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
@@ -70,7 +71,9 @@ object NetworkQualityRunner {
         context: Context,
         profile: QualityProfile,
         onProgress: suspend (stage: String, completed: Int, total: Int) -> Unit = { _, _, _ -> },
-        onInternetCheck: suspend (responded: Boolean) -> Unit = {}
+        onInternetCheck: suspend (responded: Boolean) -> Unit = {},
+        realConfig: RealProbeConfig = RealProbeConfig(),
+        videoPreview: PlayerView? = null
     ): QualityReport {
         val app = context.applicationContext
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -102,7 +105,8 @@ object NetworkQualityRunner {
             true
         }.getOrDefault(false)
         try {
-        val total = profile.tcpSamples + targets.size * profile.httpsSamples
+        val total = profile.tcpSamples + targets.size * profile.httpsSamples +
+            (if (realConfig.enabled) 5 else 0)
         var completed = 0
 
         fun checkNetwork() {
@@ -201,6 +205,45 @@ object NetworkQualityRunner {
                 }
             }
         } finally {
+            // Every HTTPS call has completed; the same pinned client also serves the
+            // optional secure two-device message relay before it is closed below.
+        }
+        checkNetwork()
+        val realTests = mutableListOf<RealProbeResult>()
+        if (realConfig.enabled) {
+            try {
+                suspend fun measureStage(
+                    title: String,
+                    block: suspend () -> RealProbeResult
+                ) {
+                    coroutineContext.ensureActive()
+                    checkNetwork()
+                    val result = RealNetworkProbes.measure(block)
+                    realTests.add(result)
+                    completed++
+                    onProgress(title, completed, total)
+                    checkNetwork()
+                }
+                measureStage("4K playback") {
+                    RealVideoProbe.run(app, network, realConfig.videoUrl, videoPreview)
+                }
+                measureStage("Gateway ICMP") {
+                    RealNetworkProbes.gateway(snapshot.gateway)
+                }
+                measureStage("ISP route") {
+                    RealNetworkProbes.route()
+                }
+                measureStage("UDP game actions") {
+                    RealNetworkProbes.udp(network, realConfig.udpHost, realConfig.udpPort)
+                }
+                measureStage("Message delivery") {
+                    RealNetworkProbes.messageRelay(realConfig.messageUrl, realConfig.messageRoom, client)
+                }
+            } finally {
+                client.connectionPool.evictAll()
+                client.dispatcher.executorService.shutdown()
+            }
+        } else {
             client.connectionPool.evictAll()
             client.dispatcher.executorService.shutdown()
         }
@@ -224,7 +267,8 @@ object NetworkQualityRunner {
             tlsHandshakeMs = synchronized(tlsSamples) {
                 val sorted = tlsSamples.sorted()
                 sorted.getOrNull(sorted.size / 2)
-            })
+            },
+            realTests = realTests)
         } finally {
             if (callbackRegistered) runCatching { cm.unregisterNetworkCallback(callback) }
         }
