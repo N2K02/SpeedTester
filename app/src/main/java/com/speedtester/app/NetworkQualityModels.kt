@@ -38,7 +38,7 @@ data class QualityAccess(
     val androidValidated: Boolean
 )
 
-data class QualityFinding(val positive: Boolean, val text: String)
+data class QualityFinding(val positive: Boolean, val text: String, val informational: Boolean = false)
 
 data class QualityReport(
     val startedAt: Long,
@@ -96,7 +96,7 @@ object QualityReportLogic {
         if (result.isEmpty() && endpoints.any { it.responded } && tcp.successes == tcp.attempts) {
             result += QualityFinding(true, "Tested TCP and HTTPS endpoints responded normally.")
         }
-        result += QualityFinding(true, "Gateway and ISP segments are informational, not actively measured hops.")
+        result += QualityFinding(true, "Gateway and ISP segments are informational, not actively measured hops.", informational = true)
         return result
     }
 }
