@@ -199,8 +199,8 @@ private fun SpeedTesterApp(context: Context) {
     var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
-    // Track the entry point so Back returns to the correct Home or Settings menu.
-    var networkQualityOrigin by remember { mutableIntStateOf(0) }
+    // History opens on speed results by default, or quality results when requested.
+    var historyInitialTab by remember { mutableIntStateOf(0) }
     var showUpdateDetails by remember { mutableStateOf(false) }
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
@@ -270,7 +270,7 @@ private fun SpeedTesterApp(context: Context) {
         return ok
     }
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
-    BackHandler(enabled = activeTab == 10) { activeTab = networkQualityOrigin }
+    BackHandler(enabled = activeTab == 10) { activeTab = 0 }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
     BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
     BackHandler(enabled = activeTab == 5 || activeTab == 9) { activeTab = 3 }
@@ -329,13 +329,20 @@ private fun SpeedTesterApp(context: Context) {
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     NavigationBarItem(
-                        selected = activeTab == 0 || (activeTab == 10 && networkQualityOrigin == 0),
+                        selected = activeTab == 0,
                         onClick = { activeTab = 0; showUpdateDetails = false },
                         icon = { Icon(Icons.Default.NetworkCheck, null) },
                         label = { Text("Home") },
                     )
                     NavigationBarItem(
-                        selected = activeTab != 0 && !(activeTab == 10 && networkQualityOrigin == 0),
+                        selected = activeTab == 10,
+                        onClick = { activeTab = 10; showUpdateDetails = false },
+                        icon = { Icon(Icons.Default.NetworkCheck, contentDescription = "Network Quality") },
+                        label = { Text("Quality") },
+                        alwaysShowLabel = true,
+                    )
+                    NavigationBarItem(
+                        selected = activeTab != 0 && activeTab != 10,
                         onClick = { activeTab = 3; showUpdateDetails = false },
                         icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
                         label = { Text("Settings") },
@@ -357,7 +364,11 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
-                10 -> NetworkQualityPage(context = context, modifier = Modifier.fillMaxSize().padding(padding))
+                10 -> NetworkQualityPage(
+                    context = context,
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    onViewHistory = { historyInitialTab = 1; activeTab = 1 }
+                )
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 0 -> LazyColumn(
@@ -365,20 +376,6 @@ private fun SpeedTesterApp(context: Context) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
                 ) {
-                    item {
-                        Card(onClick = { networkQualityOrigin = 0; activeTab = 10 },
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.NetworkCheck, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("Network Quality", style = MaterialTheme.typography.titleMedium)
-                                    Text("Check responsiveness and connection stability", style = MaterialTheme.typography.bodySmall)
-                                }
-                                Text("Test ›", color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    }
                     item {
                         Card(onClick = { activeTab = 6 },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
@@ -653,7 +650,9 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                1 -> SpeedTestHistoryScreen(
+                1 -> SpeedTestHistoryTabbedScreen(
+                    context = context,
+                    initialPage = historyInitialTab,
                     history = history,
                     modifier = Modifier.fillMaxSize().padding(padding),
                     export = {
@@ -837,20 +836,10 @@ private fun SpeedTesterApp(context: Context) {
                             modifier = Modifier.clickable { activeTab = 9; showUpdateDetails = false },
                         )
                         androidx.compose.material3.ListItem(
-                            headlineContent = { Text("Network Quality") },
-                            supportingContent = { Text("Test connection responsiveness and diagnose network issues") },
-                            leadingContent = { Icon(Icons.Default.NetworkCheck, null) },
-                            modifier = Modifier.clickable {
-                                networkQualityOrigin = 3
-                                activeTab = 10
-                                showUpdateDetails = false
-                            },
-                        )
-                        androidx.compose.material3.ListItem(
                             headlineContent = { Text("Test history") },
                             supportingContent = { Text("Previous speed tests and CSV export") },
                             leadingContent = { Icon(Icons.Default.History, null) },
-                            modifier = Modifier.clickable { activeTab = 1 },
+                            modifier = Modifier.clickable { historyInitialTab = 0; activeTab = 1 },
                         )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("Server map") },
