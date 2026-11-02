@@ -43,10 +43,21 @@ for attempt in 1 2 3 4 5; do
   CURRENT_SHA=$(gh api "repos/$TARGET/contents/$MANIFEST" --jq .sha 2>/dev/null || true)
   ARGS=(--method PUT "repos/$TARGET/contents/$MANIFEST" -f "message=Publish $APP $VERSION ($CHANNEL)" -f "content=$ENC" -f "branch=main")
   [ -z "$CURRENT_SHA" ] || ARGS+=(-f "sha=$CURRENT_SHA")
-  if gh api "${ARGS[@]}" >/dev/null; then
+  # An organization ruleset may require pull requests for public-site main.
+  # Do not retry an immutable policy rejection or weaken branch protection.
+  MANIFEST_ERROR=$(mktemp)
+  if gh api "${ARGS[@]}" >/dev/null 2>"$MANIFEST_ERROR"; then
+    rm -f "$MANIFEST_ERROR"
     echo "Published $CHANNEL $APP $VERSION code=$VERSION_CODE to $MANIFEST"
     exit 0
   fi
+  if grep -Eqi 'Cannot update this protected ref|Changes must be made through a pull request|Repository rule violations found' "$MANIFEST_ERROR"; then
+    rm -f "$MANIFEST_ERROR"
+    echo "::warning title=Protected public-site manifest::The signed APK is published at $URL, but $TARGET requires a PR to update $MANIFEST. Leaving the manifest and branch rules unchanged."
+    exit 0
+  fi
+  cat "$MANIFEST_ERROR" >&2
+  rm -f "$MANIFEST_ERROR"
   echo "::warning::Manifest update raced with another publication (attempt $attempt/5)"
   CURRENT_JSON=$(gh api "repos/$TARGET/contents/$MANIFEST" --jq .content 2>/dev/null | tr -d '\\n' | base64 -d 2>/dev/null || true)
   if [ -n "$CURRENT_JSON" ]; then
