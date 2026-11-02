@@ -7,6 +7,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.ui.PlayerView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,6 +63,25 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         } ?: QualityProfile.STANDARD)
     }
     var report by remember { mutableStateOf<QualityReport?>(null) }
+    // Explicit opt-in; real UHD playback may consume up to 24 MiB of mobile data.
+    var realEnabled by remember {
+        mutableStateOf(preferences.getBoolean("network_quality_real_enabled", false))
+    }
+    var realExpanded by remember { mutableStateOf(false) }
+    var udpHost by remember { mutableStateOf(preferences.getString("quality_udp_host", "") ?: "") }
+    var udpPort by remember { mutableStateOf(preferences.getString("quality_udp_port", "8788") ?: "8788") }
+    var messageUrl by remember { mutableStateOf(preferences.getString("quality_wss_url", "") ?: "") }
+    var messageRoom by remember { mutableStateOf("") }
+    val videoPreview = remember(context) {
+        PlayerView(context).apply {
+            useController = false
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            keepScreenOn = false
+        }
+    }
+    DisposableEffect(videoPreview) {
+        onDispose { videoPreview.player = null }
+    }
     var internetResponded by remember { mutableStateOf<Boolean?>(null) }
     var access by remember { mutableStateOf(NetworkQualityRunner.access(context)) }
     var running by remember { mutableStateOf(false) }
@@ -123,7 +144,15 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                             stage = "$name · $done/$total"
                             progress = done.toFloat() / total.coerceAtLeast(1)
                         },
-                        onInternetCheck = { observed -> internetResponded = observed }
+                        onInternetCheck = { observed -> internetResponded = observed },
+                        realConfig = RealProbeConfig(
+                            enabled = realEnabled,
+                            udpHost = udpHost.trim(),
+                            udpPort = udpPort.toIntOrNull() ?: 0,
+                            messageUrl = messageUrl.trim(),
+                            messageRoom = messageRoom.trim()
+                        ),
+                        videoPreview = if (realEnabled) videoPreview else null
                     )
                     report = newReport
                     access = newReport.access
@@ -264,6 +293,103 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            item {
+                Surface(
+                    color = QualitySurface, shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Real-world diagnostics", color = Color.White,
+                                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text("Real UHD playback · ICMP hops · UDP · receiver ACK · app traffic",
+                                    color = QualityMuted, style = MaterialTheme.typography.labelSmall)
+                            }
+                            Switch(
+                                checked = realEnabled,
+                                onCheckedChange = {
+                                    realEnabled = it
+                                    preferences.edit().putBoolean("network_quality_real_enabled", it).apply()
+                                },
+                                enabled = !running
+                            )
+                        }
+                        if (realEnabled) {
+                            QualityPill("4K: max 24 MiB · max 15s · opt-in", QualityAmber)
+                            Text(
+                                "UDP game-action loss needs your relay. Confirmed message delivery " +
+                                    "needs a separate receiver. No claim of third-party gameplay or WhatsApp delivery.",
+                                color = QualityMuted, style = MaterialTheme.typography.labelSmall
+                            )
+                            TextButton(onClick = { realExpanded = !realExpanded }, enabled = !running,
+                                contentPadding = PaddingValues(horizontal = 0.dp)) {
+                                Text(if (realExpanded) "Hide relay setup" else "Configure optional UDP/message relay",
+                                    style = MaterialTheme.typography.labelSmall, color = QualityVioletLight)
+                                Icon(if (realExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    null, tint = QualityVioletLight, modifier = Modifier.size(18.dp))
+                            }
+                            if (realExpanded) {
+                                OutlinedTextField(value = udpHost, onValueChange = {
+                                    udpHost = it.take(120)
+                                    preferences.edit().putString("quality_udp_host", udpHost).apply()
+                                }, label = { Text("UDP relay hostname") }, singleLine = true,
+                                    enabled = !running, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(value = udpPort, onValueChange = {
+                                    udpPort = it.filter(Char::isDigit).take(5)
+                                    preferences.edit().putString("quality_udp_port", udpPort).apply()
+                                }, label = { Text("UDP port") }, singleLine = true,
+                                    enabled = !running, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(value = messageUrl, onValueChange = {
+                                    messageUrl = it.take(240)
+                                    preferences.edit().putString("quality_wss_url", messageUrl).apply()
+                                }, label = { Text("Secure message relay (wss://.../ws)") },
+                                    singleLine = true, enabled = !running,
+                                    modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(value = messageRoom, onValueChange = {
+                                    messageRoom = it.filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' }.take(64)
+                                }, label = { Text("Shared 12+ character pairing code") },
+                                    singleLine = true, enabled = !running,
+                                    modifier = Modifier.fillMaxWidth())
+                                Text("Run the receiver.js example from the quality-relay folder " +
+                                    "on another device before starting. Pairing codes are not saved in history.",
+                                    style = MaterialTheme.typography.labelSmall, color = QualityMuted)
+                            }
+                        }
+                    }
+                }
+            }
+            if (report?.realTests?.isNotEmpty() == true) item {
+                Surface(color = QualitySurface, shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Text("REAL-WORLD RESULTS", color = Color.White,
+                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        report!!.realTests.forEach { result ->
+                            val tint = when (result.state) {
+                                RealProbeState.VERIFIED -> QualityGreen
+                                RealProbeState.DEGRADED -> QualityAmber
+                                RealProbeState.UNAVAILABLE -> QualityRed
+                                RealProbeState.NOT_CONFIGURED -> QualityMuted
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(result.title, color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.weight(1f))
+                                    QualityPill(result.state.name.replace('_', ' '), tint)
+                                }
+                                Text(result.detail, color = QualityMuted,
+                                    style = MaterialTheme.typography.labelSmall)
+                                if (result.rxBytes != null || result.txBytes != null) {
+                                    Text("App RX ${result.rxBytes ?: 0} B · TX ${result.txBytes ?: 0} B (approximate)",
+                                        color = QualityCyan, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (report != null) item {
                 Surface(
                     color = QualitySurface, shape = RoundedCornerShape(18.dp),
@@ -322,6 +448,16 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         // Exactly one primary action, pinned so it is reachable without scrolling.
         Surface(shadowElevation = 5.dp, color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (running && realEnabled) {
+                    Text("Real UHD playback preview · muted · no streaming in background",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    AndroidView(
+                        factory = { videoPreview },
+                        modifier = Modifier.fillMaxWidth().height(112.dp)
+                    )
+                    Spacer(Modifier.height(5.dp))
+                }
                 if (running) {
                     LinearProgressIndicator(progress = { progress },
                         modifier = Modifier.fillMaxWidth().height(3.dp),
