@@ -13,7 +13,7 @@ class NetworkQualityLogicTest {
         assertNull(sample.grade)
         assertEquals(0, sample.successes)
         assertEquals("Unavailable", NetworkQualityLogic.label(sample.grade))
-        assertNull(QualityReportLogic.overall(sample, listOf(endpoint("Internet", 204))))
+        assertTrue(QualityReportLogic.overall(sample, listOf(endpoint("Internet", 204)))!! <= 79)
     }
 
     @Test fun stableLowLatencyScoresHigh() {
@@ -33,6 +33,18 @@ class NetworkQualityLogicTest {
     @Test fun gradeAlwaysBounded() {
         assertEquals(0, NetworkQualityLogic.evaluate(listOf(99999L)).grade)
         assertEquals(100, NetworkQualityLogic.evaluate(listOf(1L, 1L, 1L)).grade)
+    }
+
+    @Test fun missingTcpTargetUsesConservativeHttpsOnlyScore() {
+        val unavailable = NetworkQualityLogic.evaluate(listOf(null, null, null))
+        val score = QualityReportLogic.overall(unavailable, listOf(endpoint("Internet", 204)))
+        assertNotNull(score)
+        assertTrue(score!! <= 79)
+    }
+
+    @Test fun jitterDoesNotBridgeFailedMeasurements() {
+        val result = NetworkQualityLogic.evaluate(listOf(10L, null, 100L))
+        assertNull(result.jitterMs)
     }
 
     @Test fun noHttpsSuccessMeansNoOverallRating() {
