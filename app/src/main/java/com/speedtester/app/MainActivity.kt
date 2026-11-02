@@ -199,6 +199,8 @@ private fun SpeedTesterApp(context: Context) {
     var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
+    // Track the entry point so Back returns to the correct Home or Settings menu.
+    var networkQualityOrigin by remember { mutableIntStateOf(0) }
     var showUpdateDetails by remember { mutableStateOf(false) }
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
@@ -268,7 +270,7 @@ private fun SpeedTesterApp(context: Context) {
         return ok
     }
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
-    BackHandler(enabled = activeTab == 10) { activeTab = 0 }
+    BackHandler(enabled = activeTab == 10) { activeTab = networkQualityOrigin }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
     BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
     BackHandler(enabled = activeTab == 5 || activeTab == 9) { activeTab = 3 }
@@ -327,13 +329,13 @@ private fun SpeedTesterApp(context: Context) {
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     NavigationBarItem(
-                        selected = activeTab == 0,
+                        selected = activeTab == 0 || (activeTab == 10 && networkQualityOrigin == 0),
                         onClick = { activeTab = 0; showUpdateDetails = false },
                         icon = { Icon(Icons.Default.NetworkCheck, null) },
                         label = { Text("Home") },
                     )
                     NavigationBarItem(
-                        selected = activeTab != 0,
+                        selected = activeTab != 0 && !(activeTab == 10 && networkQualityOrigin == 0),
                         onClick = { activeTab = 3; showUpdateDetails = false },
                         icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
                         label = { Text("Settings") },
@@ -364,7 +366,7 @@ private fun SpeedTesterApp(context: Context) {
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
                 ) {
                     item {
-                        Card(onClick = { activeTab = 10 },
+                        Card(onClick = { networkQualityOrigin = 0; activeTab = 10 },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                             Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.NetworkCheck, null, tint = MaterialTheme.colorScheme.primary)
@@ -833,6 +835,16 @@ private fun SpeedTesterApp(context: Context) {
                             supportingContent = { Text("Wi-Fi scanning, precise location and Android access") },
                             leadingContent = { Icon(Icons.Default.LocationOn, null) },
                             modifier = Modifier.clickable { activeTab = 9; showUpdateDetails = false },
+                        )
+                        androidx.compose.material3.ListItem(
+                            headlineContent = { Text("Network Quality") },
+                            supportingContent = { Text("Test connection responsiveness and diagnose network issues") },
+                            leadingContent = { Icon(Icons.Default.NetworkCheck, null) },
+                            modifier = Modifier.clickable {
+                                networkQualityOrigin = 3
+                                activeTab = 10
+                                showUpdateDetails = false
+                            },
                         )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("Test history") },
