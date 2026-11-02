@@ -38,7 +38,11 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(runner.contains("checkNetwork()"))
         assertTrue(runner.contains("network.socketFactory"))
         assertTrue(runner.contains("connectionPool.evictAll()"))
-        assertTrue(page.contains("DisposableEffect(Unit) { onDispose { job?.cancel() } }"))
+        assertTrue(page.contains("DisposableEffect(context)"))
+        assertTrue(page.contains("connectivity.registerDefaultNetworkCallback(callback)"))
+        assertTrue(page.contains("connectivity.unregisterNetworkCallback(callback)"))
+        assertTrue(page.contains("job?.cancel()"))
+        assertTrue(page.contains("failure = \"Network changed. Run a new test.\""))
         assertFalse(runner.contains("GlobalScope"))
         assertFalse(runner.contains("while (true)"))
         assertFalse(page.contains("LaunchedEffect(Unit)"))
@@ -55,6 +59,8 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(page.contains("if (!running)"))
         assertTrue(page.contains("QualityPathStep(\"ISP\", null"))
         assertTrue(page.contains("QualityPathStep(\"Gateway\", null"))
+        assertTrue(page.contains("finding.informational -> Icons.Default.Info"))
+        assertTrue(page.contains("runCatching { NetworkQualityRunner.access(context) }"))
         assertTrue(runner.contains("TrafficStats.getUidRxBytes"))
     }
 }
