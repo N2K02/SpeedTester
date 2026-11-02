@@ -1,6 +1,8 @@
 package com.speedtester.app
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -41,7 +43,41 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     var failure by remember { mutableStateOf<String?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
 
-    DisposableEffect(Unit) { onDispose { job?.cancel() } }
+    // React to network changes without a polling timer; release callbacks on page exit/Quit.
+    DisposableEffect(context) {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        var trackedNetwork = connectivity.activeNetwork
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private fun invalidate() {
+                scope.launch {
+                    job?.cancel()
+                    report = null
+                    access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
+                    failure = "Network changed. Run a new test."
+                }
+            }
+            override fun onAvailable(network: Network) {
+                if (network != trackedNetwork) {
+                    trackedNetwork = network
+                    invalidate()
+                }
+            }
+            override fun onLost(network: Network) {
+                if (network == trackedNetwork) {
+                    trackedNetwork = null
+                    invalidate()
+                }
+            }
+        }
+        val registered = runCatching {
+            connectivity.registerDefaultNetworkCallback(callback)
+            true
+        }.getOrDefault(false)
+        onDispose {
+            if (registered) runCatching { connectivity.unregisterNetworkCallback(callback) }
+            job?.cancel()
+        }
+    }
     val startTest: () -> Unit = {
         if (!running) {
             // Set the flag before dispatching the coroutine so two fast taps cannot start parallel probes.
@@ -231,10 +267,16 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         report!!.findings.forEach { finding ->
                             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                Icon(if (finding.positive) Icons.Default.CheckCircle else Icons.Default.Warning,
-                                    contentDescription = null, modifier = Modifier.size(19.dp),
-                                    tint = if (finding.positive) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.error)
+                                Icon(when {
+                                    finding.informational -> Icons.Default.Info
+                                    finding.positive -> Icons.Default.CheckCircle
+                                    else -> Icons.Default.Warning
+                                }, contentDescription = null, modifier = Modifier.size(19.dp),
+                                    tint = when {
+                                        finding.informational -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        finding.positive -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.error
+                                    })
                                 Text(finding.text, style = MaterialTheme.typography.bodySmall)
                             }
                         }
