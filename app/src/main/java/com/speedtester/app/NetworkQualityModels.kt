@@ -43,7 +43,10 @@ data class QualityReport(
     val tcp: QualitySample,
     val endpoints: List<QualityEndpoint>,
     val score: Int?,
-    val findings: List<QualityFinding>
+    val findings: List<QualityFinding>,
+    val durationMs: Long = 0L,
+    val processCpuMs: Long? = null,
+    val appTrafficBytes: Long? = null
 )
 
 object QualityReportLogic {
