@@ -27,14 +27,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /** A single, manual-only test page. Leaving the page disposes the scope and stops the test. */
 @Composable
-fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
+fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier, onViewHistory: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val preferences = remember(context) {
         context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)
@@ -46,7 +46,6 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     }
     var report by remember { mutableStateOf<QualityReport?>(null) }
     var access by remember { mutableStateOf(NetworkQualityRunner.access(context)) }
-    var history by remember { mutableStateOf(NetworkQualityHistory.load(context)) }
     var running by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var stage by remember { mutableStateOf("Ready") }
@@ -105,7 +104,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     }
                     report = newReport
                     access = newReport.access
-                    history = NetworkQualityHistory.save(context, newReport)
+                    withContext(Dispatchers.IO) { NetworkQualityHistory.save(context, newReport) }
                     stage = "Complete"
                 } catch (_: CancellationException) {
                     stage = "Cancelled"
@@ -266,6 +265,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     QualityMetric("TCP timing variation", report?.tcp?.jitterMs?.let { "%.1f ms".format(Locale.US, it) } ?: "—")
                     QualityMetric("TCP successes", report?.tcp?.let { "${it.successes}/${it.attempts}" } ?: "—")
                     QualityMetric("DNS resolution", report?.dnsLookupMs?.let { "$it ms" } ?: "Not measured")
+                    QualityMetric("TLS handshake", report?.tlsHandshakeMs?.let { "$it ms" } ?: "Not measured")
                     QualityMetric("HTTPS responses", report?.endpoints?.let { endpoints ->
                         "${endpoints.sumOf { it.responses }}/${endpoints.sumOf { it.attempted }}"
                     } ?: "—")
@@ -331,47 +331,27 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     Text("Only manual, low-data probes. Detailed adds samples; none performs a bandwidth or streaming stress test.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (running) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                    failure?.let { message ->
-                        Text(message, color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (running) {
-                        OutlinedButton(onClick = cancelTest, modifier = Modifier.fillMaxWidth()) {
-                            Text("Cancel test")
-                        }
-                    } else {
-                        Button(onClick = startTest, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.NetworkCheck, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (report == null) "Run network quality test" else "Test again")
-                        }
-                    }
+                    Text("Press Run above to perform the selected profile. Results are also saved under Test History → Network Quality.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        if (history.isNotEmpty()) {
-            item {
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("RECENT RESULTS", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        history.take(5).forEachIndexed { index, entry ->
-                            if (index > 0) HorizontalDivider()
-                            QualityMetric(
-                                SimpleDateFormat("dd MMM · HH:mm", Locale.getDefault()).format(Date(entry.timestamp)) +
-                                    " · " + entry.transport,
-                                entry.score?.let { "$it/100" } ?: "—")
+        if (failure != null && !running) item {
+            Text(failure!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        if (report != null) item {
+            ElevatedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("SCENARIO CHECKS", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    QualityScenarioLogic.evaluate(report!!).forEach { scenario ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(scenario.title + " · " + scenario.state.name.lowercase().replaceFirstChar { it.uppercase() },
+                                style = MaterialTheme.typography.titleSmall)
+                            Text(scenario.detail, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        TextButton(onClick = {
-                            NetworkQualityHistory.clear(context)
-                            history = emptyList()
-                        }, modifier = Modifier.align(Alignment.End), enabled = !running) {
-                            Text("Clear quality history")
-                        }
-                        Text("Last 15 results saved locally without network identifiers.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
