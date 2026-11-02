@@ -445,8 +445,8 @@ private fun QualityHeroCard(
                         style = MaterialTheme.typography.labelSmall)
                 }
             }
-            val successes = report?.endpoints?.sumOf { it.responses }
-            if (successes != null) {
+            if (report != null) {
+                val successes = report.endpoints.sumOf { it.responses }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     QualityPill("${report.endpoints.sumOf { it.responses }}/${report.endpoints.sumOf { it.attempted }} HTTPS",
                         if (successes > 0) QualityGreen else QualityRed)
@@ -585,10 +585,10 @@ private fun QualityServiceCard(
                     val testing = running && stage.startsWith(name)
                     val text = when {
                         endpoint?.usable == true -> "Reachable"
-                        endpoint?.responded == true -> "Restricted"
-                        endpoint != null -> "No reply"
+                        endpoint?.responded == true -> "HTTP"
+                        endpoint != null -> "Fail"
                         testing -> "Testing"
-                        else -> "Untested"
+                        else -> "—"
                     }
                     val stateColor = when {
                         endpoint?.usable == true -> QualityGreen

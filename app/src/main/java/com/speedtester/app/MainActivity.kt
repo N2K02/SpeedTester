@@ -366,8 +366,7 @@ private fun SpeedTesterApp(context: Context) {
             when (activeTab) {
                 10 -> NetworkQualityPage(
                     context = context,
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                    onViewHistory = { historyInitialTab = 1; activeTab = 1 }
+                    modifier = Modifier.fillMaxSize().padding(padding)
                 )
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
