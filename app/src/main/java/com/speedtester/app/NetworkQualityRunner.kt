@@ -123,11 +123,23 @@ object NetworkQualityRunner {
         // A real DNS timing is captured from the same pinned-network HTTPS calls.
         // Avoid extra lookup requests and do not claim cached or absent DNS timings.
         val dnsSamples = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        val tlsSamples = java.util.Collections.synchronizedList(mutableListOf<Long>())
         // Connections use the selected Android Network rather than switching to mobile data on Wi-Fi failure.
         val client = OkHttpClient.Builder()
             .eventListenerFactory(object : EventListener.Factory {
                 override fun create(call: Call): EventListener = object : EventListener() {
                     private var startedNs = 0L
+                    private var tlsStartedNs = 0L
+                    override fun secureConnectStart(call: Call) {
+                        tlsStartedNs = SystemClock.elapsedRealtimeNanos()
+                    }
+                    override fun secureConnectEnd(call: Call, handshake: okhttp3.Handshake?) {
+                        if (tlsStartedNs > 0L) {
+                            tlsSamples.add(((SystemClock.elapsedRealtimeNanos() - tlsStartedNs) / 1_000_000)
+                                .coerceAtLeast(0L))
+                            tlsStartedNs = 0L
+                        }
+                    }
                     override fun dnsStart(call: Call, domainName: String) {
                         startedNs = SystemClock.elapsedRealtimeNanos()
                     }
@@ -202,6 +214,10 @@ object NetworkQualityRunner {
             appTrafficBytes = traffic,
             dnsLookupMs = synchronized(dnsSamples) {
                 val sorted = dnsSamples.sorted()
+                sorted.getOrNull(sorted.size / 2)
+            },
+            tlsHandshakeMs = synchronized(tlsSamples) {
+                val sorted = tlsSamples.sorted()
                 sorted.getOrNull(sorted.size / 2)
             })
         } finally {
