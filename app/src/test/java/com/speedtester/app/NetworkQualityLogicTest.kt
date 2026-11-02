@@ -126,6 +126,14 @@ class NetworkQualityLogicTest {
             QualityReportLogic.overall(tcp, listOf(full))!!)
     }
 
+    @Test fun wifiBandClassificationIsHonestAboutUnknownFrequencies() {
+        assertEquals("2.4 GHz", QualityReportLogic.wifiBand(2437))
+        assertEquals("5 GHz", QualityReportLogic.wifiBand(5180))
+        assertEquals("6 GHz", QualityReportLogic.wifiBand(6255))
+        assertEquals("Unknown", QualityReportLogic.wifiBand(null))
+        assertEquals("Unknown", QualityReportLogic.wifiBand(0))
+    }
+
     @Test fun unmeasuredHopsAreInformationalInsteadOfHealthy() {
         val access = QualityAccess("Wi-Fi", -55, 5180, "192.168.0.1", true)
         val tcp = NetworkQualityLogic.evaluate(listOf(10L, 11L, 12L))

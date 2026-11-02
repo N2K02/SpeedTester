@@ -50,10 +50,18 @@ data class QualityReport(
     val findings: List<QualityFinding>,
     val durationMs: Long = 0L,
     val processCpuMs: Long? = null,
-    val appTrafficBytes: Long? = null
+    val appTrafficBytes: Long? = null,
+    val dnsLookupMs: Long? = null
 )
 
 object QualityReportLogic {
+    fun wifiBand(frequencyMhz: Int?): String = when (frequencyMhz) {
+        in 2400..2500 -> "2.4 GHz"
+        in 4900..5900 -> "5 GHz"
+        in 5925..7125 -> "6 GHz"
+        else -> "Unknown"
+    }
+
     /** Only generic Internet/browsing connectivity affects the score.
      * Gaming/streaming/messaging sites may reject bots or HEAD/GET probes for policy reasons.
      */

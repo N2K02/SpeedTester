@@ -26,6 +26,11 @@ object NetworkQualityHistory {
         }.getOrDefault(emptyList())
     }
 
+    fun clear(context: Context) {
+        context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)
+            .edit().remove(KEY).apply()
+    }
+
     fun save(context: Context, report: QualityReport): List<QualityHistoryItem> {
         val items = (listOf(QualityHistoryItem(report.startedAt, report.score,
             report.access.transport, report.tcp.latencyMs)) + load(context)).take(LIMIT)

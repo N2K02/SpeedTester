@@ -3,6 +3,9 @@ package com.speedtester.app
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -33,7 +36,14 @@ import java.util.Locale
 @Composable
 fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
-    var profile by remember { mutableStateOf(QualityProfile.STANDARD) }
+    val preferences = remember(context) {
+        context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)
+    }
+    var profile by remember {
+        mutableStateOf(QualityProfile.entries.firstOrNull {
+            it.name == preferences.getString("network_quality_profile", QualityProfile.STANDARD.name)
+        } ?: QualityProfile.STANDARD)
+    }
     var report by remember { mutableStateOf<QualityReport?>(null) }
     var access by remember { mutableStateOf(NetworkQualityRunner.access(context)) }
     var history by remember { mutableStateOf(NetworkQualityHistory.load(context)) }
@@ -114,6 +124,18 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         stage = "Cancelling…"
         job?.cancel()
     }
+    // Keep manual probes from running after the app goes into the background.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) job?.cancel()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            job?.cancel()
+        }
+    }
     val score = report?.score
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -187,6 +209,10 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                         style = MaterialTheme.typography.bodySmall)
                     Text("Android internet validation: ${if (access.androidValidated) "Validated" else "Not validated"}",
                         style = MaterialTheme.typography.bodySmall)
+                    if (access.frequencyMhz != null) {
+                        Text("Wi-Fi band: ${QualityReportLogic.wifiBand(access.frequencyMhz)}", 
+                            style = MaterialTheme.typography.bodySmall)
+                    }
                     Text("Gateway and ISP hops are unmeasured; neutral icons do not mean a failure.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -239,6 +265,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     QualityMetric("TCP connect median", report?.tcp?.latencyMs?.let { "$it ms" } ?: "—")
                     QualityMetric("TCP timing variation", report?.tcp?.jitterMs?.let { "%.1f ms".format(Locale.US, it) } ?: "—")
                     QualityMetric("TCP successes", report?.tcp?.let { "${it.successes}/${it.attempts}" } ?: "—")
+                    QualityMetric("DNS resolution", report?.dnsLookupMs?.let { "$it ms" } ?: "Not measured")
                     QualityMetric("HTTPS responses", report?.endpoints?.let { endpoints ->
                         "${endpoints.sumOf { it.responses }}/${endpoints.sumOf { it.attempted }}"
                     } ?: "—")
@@ -292,7 +319,10 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()) {
                         QualityProfile.entries.forEach { option ->
-                            FilterChip(selected = profile == option, onClick = { profile = option },
+                            FilterChip(selected = profile == option, onClick = {
+                                profile = option
+                                preferences.edit().putString("network_quality_profile", option.name).apply()
+                            },
                                 enabled = !running,
                                 label = { Text(option.name.lowercase().replaceFirstChar { it.uppercase() },
                                     style = MaterialTheme.typography.labelSmall) })
@@ -332,6 +362,12 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                                 SimpleDateFormat("dd MMM · HH:mm", Locale.getDefault()).format(Date(entry.timestamp)) +
                                     " · " + entry.transport,
                                 entry.score?.let { "$it/100" } ?: "—")
+                        }
+                        TextButton(onClick = {
+                            NetworkQualityHistory.clear(context)
+                            history = emptyList()
+                        }, modifier = Modifier.align(Alignment.End), enabled = !running) {
+                            Text("Clear quality history")
                         }
                         Text("Last 15 results saved locally without network identifiers.",
                             style = MaterialTheme.typography.bodySmall,

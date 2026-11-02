@@ -17,6 +17,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
 import okhttp3.Dns
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -119,8 +120,30 @@ object NetworkQualityRunner {
             onProgress("TCP connection", completed, total)
         }
 
+        // A real DNS timing is captured from the same pinned-network HTTPS calls.
+        // Avoid extra lookup requests and do not claim cached or absent DNS timings.
+        val dnsSamples = java.util.Collections.synchronizedList(mutableListOf<Long>())
         // Connections use the selected Android Network rather than switching to mobile data on Wi-Fi failure.
         val client = OkHttpClient.Builder()
+            .eventListenerFactory(object : EventListener.Factory {
+                override fun create(call: Call): EventListener = object : EventListener() {
+                    private var startedNs = 0L
+                    override fun dnsStart(call: Call, domainName: String) {
+                        startedNs = SystemClock.elapsedRealtimeNanos()
+                    }
+                    override fun dnsEnd(
+                        call: Call, domainName: String,
+                        inetAddressList: List<java.net.InetAddress>
+                    ) {
+                        if (startedNs > 0L) {
+                            val elapsed = ((SystemClock.elapsedRealtimeNanos() - startedNs) / 1_000_000)
+                                .coerceAtLeast(0L)
+                            dnsSamples.add(elapsed)
+                            startedNs = 0L
+                        }
+                    }
+                }
+            })
             .socketFactory(network.socketFactory)
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<java.net.InetAddress> =
@@ -176,7 +199,11 @@ object NetworkQualityRunner {
             QualityReportLogic.findings(snapshot, tcp, endpointResults),
             durationMs = SystemClock.elapsedRealtime() - wallStart,
             processCpuMs = Process.getElapsedCpuTime() - cpuStart,
-            appTrafficBytes = traffic)
+            appTrafficBytes = traffic,
+            dnsLookupMs = synchronized(dnsSamples) {
+                val sorted = dnsSamples.sorted()
+                sorted.getOrNull(sorted.size / 2)
+            })
         } finally {
             if (callbackRegistered) runCatching { cm.unregisterNetworkCallback(callback) }
         }
