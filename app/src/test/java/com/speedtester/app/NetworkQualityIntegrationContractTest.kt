@@ -23,6 +23,8 @@ class NetworkQualityIntegrationContractTest {
         assertFalse(main.substringAfter("3 -> if (!showUpdateDetails) LazyColumn(")
             .contains("headlineContent = { Text(\"Network Quality\") }"))
         assertTrue(main.contains("SpeedTestHistoryTabbedScreen("))
+        assertTrue(main.contains("historyInitialTab = 1; activeTab = 1"))
+        assertFalse(main.contains("networkQualityOrigin"))
         val page = source("NetworkQualityPage.kt")
         assertFalse(page.contains("TopAppBar("))
         assertTrue(page.contains("N2K02Theme").not()) // central theme owns page styling
@@ -63,7 +65,17 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(page.contains("report = null"))
         assertTrue(page.contains("Lifecycle.Event.ON_STOP"))
         assertTrue(page.contains("lifecycleOwner.lifecycle.removeObserver(observer)"))
-        assertTrue(page.contains("NetworkQualityHistory.clear(context)"))
+        assertTrue(page.contains("NetworkQualityHistory.save(context, newReport)"))
+        assertTrue(page.contains("onViewHistory"))
+        assertEquals(1, "Only one manual Run button may be rendered",
+            Regex("Button\\(onClick = startTest").findAll(page).count())
+        assertEquals(1, "Only one Cancel button may be rendered",
+            Regex("OutlinedButton\\(onClick = cancelTest").findAll(page).count())
+        val tabs = source("NetworkQualityHistoryTabs.kt")
+        assertTrue(tabs.contains("HorizontalPager(state = pagerState"))
+        assertTrue(tabs.contains("pagerState.animateScrollToPage(page)"))
+        assertTrue(tabs.contains("SpeedTestHistoryScreen("))
+        assertTrue(tabs.contains("NetworkQualityHistoryPage("))
         assertTrue(page.contains("network_quality_profile"))
         assertTrue(runner.contains(".eventListenerFactory(object : EventListener.Factory"))
         assertTrue(page.contains("if (!running)"))
