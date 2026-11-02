@@ -175,6 +175,8 @@ object NetworkQualityRunner {
             .build()
 
         val endpointResults = mutableListOf<QualityEndpoint>()
+        // Close the HTTP dispatcher on every exit path, including cancellation during baseline probes.
+        try {
         try {
             for (target in targets) {
                 val durations = mutableListOf<Long>()
@@ -205,8 +207,7 @@ object NetworkQualityRunner {
                 }
             }
         } finally {
-            // Every HTTPS call has completed; the same pinned client also serves the
-            // optional secure two-device message relay before it is closed below.
+            // The client remains open until the real-world sequence and outer finally complete.
         }
         checkNetwork()
         val realTests = mutableListOf<RealProbeResult>()
@@ -240,12 +241,8 @@ object NetworkQualityRunner {
                     RealNetworkProbes.messageRelay(realConfig.messageUrl, realConfig.messageRoom, client)
                 }
             } finally {
-                client.connectionPool.evictAll()
-                client.dispatcher.executorService.shutdown()
+                // The outer finally below closes every connection, including cancellation paths.
             }
-        } else {
-            client.connectionPool.evictAll()
-            client.dispatcher.executorService.shutdown()
         }
         checkNetwork()
         val tcp = NetworkQualityLogic.evaluate(tcpSamples)
@@ -269,6 +266,10 @@ object NetworkQualityRunner {
                 sorted.getOrNull(sorted.size / 2)
             },
             realTests = realTests)
+        } finally {
+            client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdown()
+        }
         } finally {
             if (callbackRegistered) runCatching { cm.unregisterNetworkCallback(callback) }
         }
