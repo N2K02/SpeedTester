@@ -44,6 +44,15 @@ class NetworkQualityPathLogicTest {
         assertEquals(QualityPathState.UNMEASURED, nodes[3].state)
     }
 
+    @Test fun liveInternetResultTransitionsFromTestingToObservedStatus() {
+        val testing = NetworkQualityPathLogic.build(wifi, null, true, "Internet · 5/10")
+        assertEquals(QualityPathState.TESTING, testing.last().state)
+        val responded = NetworkQualityPathLogic.build(wifi, null, true, "Browsing · 6/10", true)
+        assertEquals(QualityPathState.SUCCESS, responded.last().state)
+        val blocked = NetworkQualityPathLogic.build(wifi, null, true, "Browsing · 6/10", false)
+        assertEquals(QualityPathState.FAILED, blocked.last().state)
+    }
+
     @Test fun offlineAccessAndInternetShowFailure() {
         val offline = QualityAccess("Disconnected", null, null, null, false)
         val nodes = NetworkQualityPathLogic.build(offline, null, false, "Ready")

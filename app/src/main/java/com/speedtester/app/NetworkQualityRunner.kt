@@ -69,7 +69,8 @@ object NetworkQualityRunner {
     suspend fun run(
         context: Context,
         profile: QualityProfile,
-        onProgress: suspend (stage: String, completed: Int, total: Int) -> Unit = { _, _, _ -> }
+        onProgress: suspend (stage: String, completed: Int, total: Int) -> Unit = { _, _, _ -> },
+        onInternetCheck: suspend (responded: Boolean) -> Unit = {}
     ): QualityReport {
         val app = context.applicationContext
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -194,6 +195,10 @@ object NetworkQualityRunner {
                 endpointResults += QualityEndpoint(target.service, target.host,
                     durations.sorted().let { if (it.isEmpty()) null else it[it.size / 2] },
                     lastStatus, profile.httpsSamples, successes, responses)
+                if (target.service == "Internet") {
+                    // Publish only the actual observed result, never a hypothetical success.
+                    onInternetCheck(responses > 0)
+                }
             }
         } finally {
             client.connectionPool.evictAll()

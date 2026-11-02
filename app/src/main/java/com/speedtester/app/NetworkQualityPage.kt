@@ -66,6 +66,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         } ?: QualityProfile.STANDARD)
     }
     var report by remember { mutableStateOf<QualityReport?>(null) }
+    var internetResponded by remember { mutableStateOf<Boolean?>(null) }
     var access by remember { mutableStateOf(NetworkQualityRunner.access(context)) }
     var running by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -82,6 +83,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                 scope.launch {
                     job?.cancel()
                     report = null
+                    internetResponded = null
                     access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
                     failure = "Network changed. Run a new test."
                 }
@@ -116,13 +118,18 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
             stage = "Starting test"
             failure = null
             report = null  // A different network may now be selected; never show a previous quality grade.
+            internetResponded = null
             access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
             job = scope.launch {
                 try {
-                    val newReport = NetworkQualityRunner.run(context, profile) { name, done, total ->
-                        stage = "$name · $done/$total"
-                        progress = done.toFloat() / total.coerceAtLeast(1)
-                    }
+                    val newReport = NetworkQualityRunner.run(
+                        context, profile,
+                        onProgress = { name, done, total ->
+                            stage = "$name · $done/$total"
+                            progress = done.toFloat() / total.coerceAtLeast(1)
+                        },
+                        onInternetCheck = { observed -> internetResponded = observed }
+                    )
                     report = newReport
                     access = newReport.access
                     withContext(Dispatchers.IO) { NetworkQualityHistory.save(context, newReport) }
@@ -157,7 +164,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         }
     }
     val score = report?.score
-    val path = NetworkQualityPathLogic.build(access, report, running, stage)
+    val path = NetworkQualityPathLogic.build(access, report, running, stage, internetResponded)
     val measuredEndpoints = report?.endpoints.orEmpty()
     val findings = report?.let { QualityScenarioLogic.evaluate(it) }.orEmpty()
     var expandedDiagnostics by remember { mutableStateOf(false) }

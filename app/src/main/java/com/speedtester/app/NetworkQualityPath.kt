@@ -15,7 +15,8 @@ object NetworkQualityPathLogic {
         access: QualityAccess,
         report: QualityReport?,
         running: Boolean,
-        stage: String
+        stage: String,
+        internetResponded: Boolean? = null
     ): List<QualityPathNode> {
         val connected = access.transport != "Disconnected"
         val accessState = if (connected) QualityPathState.SUCCESS else QualityPathState.FAILED
@@ -37,6 +38,8 @@ object NetworkQualityPathLogic {
         val internetState = when {
             endpoint != null && endpoint.responded -> QualityPathState.SUCCESS
             endpoint != null -> QualityPathState.FAILED
+            internetResponded == true -> QualityPathState.SUCCESS
+            internetResponded == false -> QualityPathState.FAILED
             !connected -> QualityPathState.FAILED
             running && stage.startsWith("Internet") -> QualityPathState.TESTING
             else -> QualityPathState.PENDING
