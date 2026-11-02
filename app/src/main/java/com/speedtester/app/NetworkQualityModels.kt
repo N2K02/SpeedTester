@@ -50,7 +50,6 @@ object QualityReportLogic {
     /** Never return a positive overall rating when HTTPS reachability was not demonstrated. */
     fun overall(tcp: QualitySample, endpoints: List<QualityEndpoint>): Int? {
         val reachable = endpoints.filter { it.usable }
-        val tcpGrade = tcp.grade ?: return null
         if (reachable.isEmpty()) return null
         val successes = endpoints.sumOf { it.successful }
         val attempts = endpoints.sumOf { it.attempted }
@@ -60,14 +59,21 @@ object QualityReportLogic {
         val medianHttp = reachable.mapNotNull { it.latencyMs }.sorted()
             .let { if (it.isEmpty()) 0L else it[it.size / 2] }
         val responsiveness = (100.0 - (medianHttp - 100).coerceAtLeast(0) * .08).coerceIn(0.0, 100.0)
-        return (tcpGrade * .60 + endpointReliability * .25 + responsiveness * .15)
-            .roundToInt().coerceIn(0, 100)
+        return if (tcp.grade == null) {
+            // Some networks block the selected TCP target even while HTTPS works.
+            // Give a conservative, explicitly limited HTTPS-only estimate.
+            (endpointReliability * .70 + responsiveness * .30).roundToInt().coerceIn(0, 79)
+        } else {
+            (tcp.grade * .60 + endpointReliability * .25 + responsiveness * .15)
+                .roundToInt().coerceIn(0, 100)
+        }
     }
 
     fun findings(access: QualityAccess, tcp: QualitySample, endpoints: List<QualityEndpoint>): List<QualityFinding> {
         val result = mutableListOf<QualityFinding>()
         if (!access.androidValidated) result += QualityFinding(false, "Android has not validated internet access on this network.")
         access.signalDbm?.let { if (it <= -75) result += QualityFinding(false, "Weak Wi-Fi signal ($it dBm). Move closer to the access point.") }
+        if (tcp.grade == null) result += QualityFinding(false, "TCP probe target unavailable. Overall rating uses HTTPS-only measurements.")
         tcp.latencyMs?.let { if (it > 120) result += QualityFinding(false, "High TCP connection time (${it} ms).") }
         if (tcp.successes < tcp.attempts) result += QualityFinding(false,
             "${tcp.attempts - tcp.successes} TCP connection attempts failed; this is not a packet-loss measurement.")
