@@ -80,7 +80,8 @@ class NetworkQualityLogicTest {
         val restricted = endpoint("Gaming", 403)
         assertTrue(restricted.responded)
         assertFalse(restricted.usable)
-        assertEquals("HTTP 403", restricted.status)
+        assertTrue(restricted.status.startsWith("HTTP 403"))
+        assertTrue(restricted.status.contains("restricted"))
     }
 
     @Test fun findingsWarnAboutSignalAndConnectionFailureWithoutInventingPacketLoss() {
