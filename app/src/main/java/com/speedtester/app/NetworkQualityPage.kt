@@ -84,7 +84,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         QualityPathStep(access.transport, access.transport != "Disconnected", Modifier.weight(1f))
-                        QualityPathStep("Gateway", access.gateway != null, Modifier.weight(1f))
+                        QualityPathStep("Gateway", access.gateway?.let { true }, Modifier.weight(1f))
                         QualityPathStep("Android check", access.androidValidated, Modifier.weight(1f))
                         QualityPathStep("HTTPS", report?.endpoints?.any { it.service == "Internet" && it.usable },
                             Modifier.weight(1f))
@@ -139,6 +139,14 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     QualityMetric("HTTPS successes", report?.endpoints?.let { endpoints ->
                         "${endpoints.sumOf { it.successful }}/${endpoints.sumOf { it.attempted }}"
                     } ?: "—")
+                    QualityMetric("Test duration", report?.durationMs?.let { "%.1f s".format(Locale.US, it / 1000.0) } ?: "—")
+                    QualityMetric("Process CPU time", report?.processCpuMs?.let { "$it ms" } ?: "—")
+                    QualityMetric("App traffic (approx.)", report?.appTrafficBytes?.let {
+                        "%.1f KiB".format(Locale.US, it / 1024.0)
+                    } ?: "—")
+                    Text("Traffic counter includes other SpeedTester activity during this interval.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("TCP connection failures are not ICMP/UDP packet loss.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
