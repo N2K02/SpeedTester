@@ -68,6 +68,10 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
         mutableStateOf(preferences.getBoolean("network_quality_real_enabled", false))
     }
     var realExpanded by remember { mutableStateOf(false) }
+    var videoUrl by remember {
+        mutableStateOf(preferences.getString("quality_video_url", RealProbeConfig.DEFAULT_VIDEO_URL)
+            ?: RealProbeConfig.DEFAULT_VIDEO_URL)
+    }
     var udpHost by remember { mutableStateOf(preferences.getString("quality_udp_host", "") ?: "") }
     var udpPort by remember { mutableStateOf(preferences.getString("quality_udp_port", "8788") ?: "8788") }
     var messageUrl by remember { mutableStateOf(preferences.getString("quality_wss_url", "") ?: "") }
@@ -151,6 +155,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                         onRealResult = { measured -> liveRealResults = liveRealResults + measured },
                         realConfig = RealProbeConfig(
                             enabled = realEnabled,
+                            videoUrl = videoUrl.trim(),
                             udpHost = udpHost.trim(),
                             udpPort = udpPort.toIntOrNull() ?: 0,
                             messageUrl = messageUrl.trim(),
@@ -336,6 +341,11 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                                     null, tint = QualityVioletLight, modifier = Modifier.size(18.dp))
                             }
                             if (realExpanded) {
+                                OutlinedTextField(value = videoUrl, onValueChange = {
+                                    videoUrl = it.take(512)
+                                    preferences.edit().putString("quality_video_url", videoUrl).apply()
+                                }, label = { Text("4K video HTTPS URL") }, singleLine = true,
+                                    enabled = !running, modifier = Modifier.fillMaxWidth())
                                 OutlinedTextField(value = udpHost, onValueChange = {
                                     udpHost = it.take(120)
                                     preferences.edit().putString("quality_udp_host", udpHost).apply()
@@ -357,7 +367,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                                 }, label = { Text("Shared 12+ character pairing code") },
                                     singleLine = true, enabled = !running,
                                     modifier = Modifier.fillMaxWidth())
-                                Text("Run the receiver.js example from the quality-relay folder " +
+                                Text("Run the receiver.mjs example from the quality-relay folder " +
                                     "on another device before starting. Pairing codes are not saved in history.",
                                     style = MaterialTheme.typography.labelSmall, color = QualityMuted)
                             }

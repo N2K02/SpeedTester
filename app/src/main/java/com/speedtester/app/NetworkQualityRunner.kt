@@ -220,6 +220,8 @@ object NetworkQualityRunner {
                 ) {
                     coroutineContext.ensureActive()
                     checkNetwork()
+                    // Publish the live stage BEFORE its network operation starts.
+                    onProgress(title, completed, total)
                     val result = RealNetworkProbes.measure(block)
                     realTests.add(result)
                     onRealResult(result)
