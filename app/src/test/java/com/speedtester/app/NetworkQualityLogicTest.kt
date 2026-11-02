@@ -90,7 +90,39 @@ class NetworkQualityLogicTest {
         assertTrue(findings.any { it.text.contains("Weak Wi-Fi") })
         assertTrue(findings.any { it.text.contains("not a packet-loss measurement") })
         assertTrue(findings.any { it.text.contains("not validated") })
-        assertTrue(findings.any { it.text.contains("HTTPS endpoint") })
+        assertTrue(findings.any { it.text.contains("website endpoints responded with restrictions") })
+    }
+
+    @Test fun optionalWebsiteRestrictionsDoNotPenalizeConnectionScore() {
+        val tcp = NetworkQualityLogic.evaluate(listOf(15L, 14L, 16L))
+        val core = listOf(endpoint("Internet", 204), endpoint("Browsing", 204))
+        val baseline = QualityReportLogic.overall(tcp, core)
+        val withRestrictions = QualityReportLogic.overall(tcp, core +
+            listOf(endpoint("Gaming", 403), endpoint("WhatsApp", 429), endpoint("Streaming", 500)))
+        assertEquals(baseline, withRestrictions)
+    }
+
+    @Test fun serverPolicyResponseDoesNotMeanInternetUnavailable() {
+        val restricted = endpoint("Internet", 403)
+        assertTrue(restricted.responded)
+        assertFalse(restricted.usable)
+        assertTrue(restricted.status.contains("restricted"))
+        val tcp = NetworkQualityLogic.evaluate(listOf(15L, 16L, 16L))
+        assertNotNull(QualityReportLogic.overall(tcp, listOf(restricted)))
+    }
+
+    @Test fun onlyCoreInternetTargetsDetermineReachability() {
+        val tcp = NetworkQualityLogic.evaluate(listOf(15L, 16L, 16L))
+        assertNull(QualityReportLogic.overall(tcp, listOf(endpoint("Gaming", 200), endpoint("WhatsApp", 204))))
+        assertNull(QualityReportLogic.overall(tcp, listOf(endpoint("Internet", null), endpoint("Browsing", null))))
+    }
+
+    @Test fun partialEndpointRepliesAreNotAllFailures() {
+        val tcp = NetworkQualityLogic.evaluate(listOf(15L, 16L, 16L))
+        val half = QualityEndpoint("Internet", "example.net", 50L, 204, 2, 1, 1)
+        val full = QualityEndpoint("Internet", "example.net", 50L, 204, 2, 2, 2)
+        assertTrue(QualityReportLogic.overall(tcp, listOf(half))!! <
+            QualityReportLogic.overall(tcp, listOf(full))!!)
     }
 
     @Test fun testProfilesHaveStrictBoundedProbeBudgets() {
