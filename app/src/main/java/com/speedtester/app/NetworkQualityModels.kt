@@ -15,14 +15,18 @@ data class QualityEndpoint(
     val latencyMs: Long?,
     val httpCode: Int?,
     val attempted: Int,
-    val successful: Int
+    val successful: Int,
+    // Any HTTP response proves HTTPS transport reachability, even if the host denies automation.
+    val responses: Int = if (httpCode == null) 0 else attempted
 ) {
-    val responded: Boolean get() = httpCode != null
-    val usable: Boolean get() = httpCode != null && httpCode in 200..399
+    val responded: Boolean get() = responses > 0
+    val usable: Boolean get() = successful > 0
     val status: String get() = when {
         usable -> "Reachable"
-        responded -> "HTTP $httpCode"
-        else -> "Unavailable"
+        !responded -> "No response"
+        httpCode in 400..499 -> "HTTP $httpCode (restricted)"
+        httpCode in 500..599 -> "HTTP $httpCode (server error)"
+        else -> "HTTP $httpCode"
     }
 }
 
@@ -50,21 +54,22 @@ data class QualityReport(
 )
 
 object QualityReportLogic {
-    /** Never return a positive overall rating when HTTPS reachability was not demonstrated. */
+    /** Only generic Internet/browsing connectivity affects the score.
+     * Gaming/streaming/messaging sites may reject bots or HEAD/GET probes for policy reasons.
+     */
     fun overall(tcp: QualitySample, endpoints: List<QualityEndpoint>): Int? {
-        val reachable = endpoints.filter { it.usable }
-        if (reachable.isEmpty()) return null
-        val successes = endpoints.sumOf { it.successful }
-        val attempts = endpoints.sumOf { it.attempted }
-        if (attempts <= 0) return null
-        val endpointReliability = 100.0 * successes / attempts
-        // Penalize slow endpoints without declaring their actual service performance.
-        val medianHttp = reachable.mapNotNull { it.latencyMs }.sorted()
-            .let { if (it.isEmpty()) 0L else it[it.size / 2] }
-        val responsiveness = (100.0 - (medianHttp - 100).coerceAtLeast(0) * .08).coerceIn(0.0, 100.0)
+        val generic = endpoints.filter { it.service == "Internet" || it.service == "Browsing" }
+        val attempts = generic.sumOf { it.attempted }
+        val responses = generic.sumOf { it.responses }
+        if (attempts <= 0 || responses <= 0) return null
+        val endpointReliability = 100.0 * responses.coerceAtMost(attempts) / attempts
+        // This is HTTPS response latency, which includes DNS/TLS and is not gaming latency.
+        val timings = generic.filter { it.responded }.mapNotNull { it.latencyMs }.sorted()
+        val medianHttp = timings.getOrNull(timings.size / 2) ?: return null
+        val responsiveness = (100.0 - (medianHttp - 100).coerceAtLeast(0) * .08)
+            .coerceIn(0.0, 100.0)
         return if (tcp.grade == null) {
-            // Some networks block the selected TCP target even while HTTPS works.
-            // Give a conservative, explicitly limited HTTPS-only estimate.
+            // Network policy may block the independent TCP target even when HTTPS works.
             (endpointReliability * .70 + responsiveness * .30).roundToInt().coerceIn(0, 79)
         } else {
             (tcp.grade * .60 + endpointReliability * .25 + responsiveness * .15)
@@ -81,14 +86,17 @@ object QualityReportLogic {
         if (tcp.successes < tcp.attempts) result += QualityFinding(false,
             "${tcp.attempts - tcp.successes} TCP connection attempts failed; this is not a packet-loss measurement.")
         if (endpoints.isNotEmpty()) {
-            val failed = endpoints.filterNot { it.usable }
-            if (failed.isNotEmpty()) result += QualityFinding(false,
-                "${failed.size} of ${endpoints.size} HTTPS endpoint checks failed or returned a non-success status.")
+            val noResponse = endpoints.filterNot { it.responded }
+            if (noResponse.isNotEmpty()) result += QualityFinding(false,
+                "${noResponse.size} of ${endpoints.size} HTTPS endpoints did not respond.")
+            val restricted = endpoints.filter { it.responded && !it.usable }
+            if (restricted.isNotEmpty()) result += QualityFinding(true,
+                "${restricted.size} website endpoints responded with restrictions or server errors; this alone does not indicate an ISP fault.")
         }
-        if (result.isEmpty() && endpoints.any { it.usable } && tcp.successes == tcp.attempts) {
+        if (result.isEmpty() && endpoints.any { it.responded } && tcp.successes == tcp.attempts) {
             result += QualityFinding(true, "Tested TCP and HTTPS endpoints responded normally.")
         }
-        result += QualityFinding(true, "Gateway presence and ISP path are informational; intermediate hops were not actively tested.")
+        result += QualityFinding(true, "Gateway and ISP segments are informational, not actively measured hops.")
         return result
     }
 }
