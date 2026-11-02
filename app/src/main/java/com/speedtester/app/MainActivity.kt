@@ -204,8 +204,10 @@ private fun SpeedTesterApp(context: Context) {
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
-    // No periodic network polling while the Activity is in the background.
-    LaunchedEffect(lifecycleOwner) {
+    // Poll only on pages displaying live network information, and only while foregrounded.
+    // Network Quality uses its own one-shot snapshot and must not incur idle polling.
+    LaunchedEffect(lifecycleOwner, activeTab) {
+        if (activeTab != 0 && activeTab != 7) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 netInfo = readNetworkInfo(context)
