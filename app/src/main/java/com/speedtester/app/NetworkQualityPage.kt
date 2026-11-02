@@ -16,14 +16,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NetworkCheck
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.SportsEsports
@@ -32,7 +29,6 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
@@ -44,7 +40,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -315,7 +310,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
             item {
                 Text(
                     "Website checks test HTTPS reachability, not video playback, gameplay or message delivery. " +
-                        "TCP failures are not ICMP/UDP packet loss. Gateway and ISP hops are not probed. " +
+                        "TCP connection failures are not ICMP/UDP packet loss. Gateway and ISP hops are not probed. " +
                         "App traffic includes other SpeedTester activity during the test.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

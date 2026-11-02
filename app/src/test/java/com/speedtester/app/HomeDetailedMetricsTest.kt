@@ -31,7 +31,7 @@ class HomeDetailedMetricsTest {
         ).first { it.isDirectory }
         val main = File(sourceRoot, "MainActivity.kt").readText()
         val first = main.indexOf("0 -> LazyColumn(")
-        val last = main.indexOf("1 -> SpeedTestHistoryScreen(", first)
+        val last = main.indexOf("1 -> SpeedTestHistoryTabbedScreen(", first)
         assertTrue(first >= 0 && last > first)
         val home = main.substring(first, last)
         assertTrue(home.contains("SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)"))
