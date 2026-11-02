@@ -353,7 +353,7 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
-                10 -> NetworkQualityPage(modifier = Modifier.fillMaxSize().padding(padding))
+                10 -> NetworkQualityPage(context = context, modifier = Modifier.fillMaxSize().padding(padding))
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 0 -> LazyColumn(
