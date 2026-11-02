@@ -183,6 +183,11 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier, onViewHi
                             Spacer(Modifier.width(8.dp))
                             Text(if (report == null) "Run network quality test" else "Test again")
                         }
+                        if (report != null) {
+                            TextButton(onClick = onViewHistory) {
+                                Text("View results in Test History")
+                            }
+                        }
                     }
                 }
             }
