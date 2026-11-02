@@ -8,18 +8,24 @@ import android.net.TrafficStats
 import android.os.Process
 import android.net.wifi.WifiInfo
 import android.os.SystemClock
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.ConnectionPool
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
 import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resume
 
 /** A manual, bounded diagnostic; there are no services, timers, or periodic network requests. */
 object NetworkQualityRunner {
@@ -42,10 +48,10 @@ object NetworkQualityRunner {
         val wifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         val cell = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
         val type = when {
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true -> "VPN"
             wifi -> "Wi-Fi"
             cell -> "Mobile data"
             caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "Ethernet"
-            caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true -> "VPN"
             network != null -> "Other network"
             else -> "Disconnected"
         }
@@ -78,18 +84,36 @@ object NetworkQualityRunner {
             return QualityReport(started, profile, snapshot, empty, emptyList(), null,
                 listOf(QualityFinding(false, "Connect to Wi-Fi or mobile data to run a test.")))
         }
+        val changed = AtomicBoolean(false)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(active: Network) {
+                if (active != network) changed.set(true)
+            }
+            override fun onLost(lost: Network) {
+                if (lost == network) changed.set(true)
+            }
+        }
+        // A callback catches brief disconnect/reconnect sequences that comparing the current network alone misses.
+        // If registration is restricted, the active-network comparison remains the fallback.
+        val callbackRegistered = runCatching {
+            cm.registerDefaultNetworkCallback(callback)
+            true
+        }.getOrDefault(false)
+        try {
         val total = profile.tcpSamples + targets.size * profile.httpsSamples
         var completed = 0
 
         fun checkNetwork() {
-            if (cm.activeNetwork != network) throw NetworkChanged()
+            if (changed.get() || cm.activeNetwork != network) throw NetworkChanged()
         }
 
         val tcpSamples = ArrayList<Long?>(profile.tcpSamples)
         repeat(profile.tcpSamples) {
             coroutineContext.ensureActive()
             checkNetwork()
-            val latency = withContext(Dispatchers.IO) { connect(network) }
+            val latency = connect(network)
+            coroutineContext.ensureActive()
+            checkNetwork()
             tcpSamples += latency
             completed++
             onProgress("TCP connection", completed, total)
@@ -116,23 +140,25 @@ object NetworkQualityRunner {
                 val durations = mutableListOf<Long>()
                 var lastStatus: Int? = null
                 var successes = 0
+                var responses = 0
                 repeat(profile.httpsSamples) {
                     coroutineContext.ensureActive()
                     checkNetwork()
-                    val response = withContext(Dispatchers.IO) { httpsHead(client, target.url) }
+                    val response = httpsProbe(client, target.url)
+                    coroutineContext.ensureActive()
+                    checkNetwork()
                     if (response.first != null) {
                         lastStatus = response.first
-                        if (response.first in 200..399) {
-                            successes++
-                            response.second?.let(durations::add)
-                        }
+                        responses++
+                        if (response.first in 200..399) successes++
+                        response.second?.let(durations::add)
                     }
                     completed++
                     onProgress(target.service, completed, total)
                 }
                 endpointResults += QualityEndpoint(target.service, target.host,
                     durations.sorted().let { if (it.isEmpty()) null else it[it.size / 2] },
-                    lastStatus, profile.httpsSamples, successes)
+                    lastStatus, profile.httpsSamples, successes, responses)
             }
         } finally {
             client.connectionPool.evictAll()
@@ -151,27 +177,53 @@ object NetworkQualityRunner {
             durationMs = SystemClock.elapsedRealtime() - wallStart,
             processCpuMs = Process.getElapsedCpuTime() - cpuStart,
             appTrafficBytes = traffic)
+        } finally {
+            if (callbackRegistered) runCatching { cm.unregisterNetworkCallback(callback) }
+        }
     }
 
-    private fun connect(network: Network): Long? {
-        return try {
-            network.socketFactory.createSocket().use { socket ->
-                val start = SystemClock.elapsedRealtimeNanos()
-                socket.connect(InetSocketAddress("1.1.1.1", 443), 1200)
-                ((SystemClock.elapsedRealtimeNanos() - start) / 1_000_000).coerceAtLeast(1)
-            }
-        } catch (_: java.io.IOException) { null }
-    }
-
-    /** HEAD requests read only headers; these are not video, game, or message performance tests. */
-    private fun httpsHead(client: OkHttpClient, url: String): Pair<Int?, Long?> {
-        return try {
-            val start = SystemClock.elapsedRealtimeNanos()
-            client.newCall(Request.Builder().url(url).head().header("Cache-Control", "no-cache").build())
-                .execute().use { response ->
-                    val millis = ((SystemClock.elapsedRealtimeNanos() - start) / 1_000_000).coerceAtLeast(1)
-                    response.code to millis
+    /** Cancellation closes the live socket immediately rather than waiting for the connect timeout. */
+    private suspend fun connect(network: Network): Long? = suspendCancellableCoroutine { continuation ->
+        val socket = try {
+            network.socketFactory.createSocket()
+        } catch (_: Exception) {
+            continuation.resume(null)
+            return@suspendCancellableCoroutine
+        }
+        val worker = CoroutineScope(Dispatchers.IO).launch {
+            val value = try {
+                socket.use {
+                    val start = SystemClock.elapsedRealtimeNanos()
+                    it.connect(InetSocketAddress("1.1.1.1", 443), 1200)
+                    ((SystemClock.elapsedRealtimeNanos() - start) / 1_000_000).coerceAtLeast(1)
                 }
-        } catch (_: java.io.IOException) { null to null }
+            } catch (_: Exception) { null }
+            continuation.resume(value)
+        }
+        continuation.invokeOnCancellation {
+            runCatching { socket.close() }
+            worker.cancel()
+        }
     }
+
+    /** GET reads response headers only, then closes the body. No streaming or download stress test. */
+    private suspend fun httpsProbe(client: OkHttpClient, url: String): Pair<Int?, Long?> =
+        suspendCancellableCoroutine { continuation ->
+            val start = SystemClock.elapsedRealtimeNanos()
+            val call = client.newCall(
+                Request.Builder().url(url).get().header("Cache-Control", "no-cache").build()
+            )
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    continuation.resume(null to null)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val millis = ((SystemClock.elapsedRealtimeNanos() - start) / 1_000_000).coerceAtLeast(1)
+                        continuation.resume(it.code to millis)
+                    }
+                }
+            })
+        }
 }
