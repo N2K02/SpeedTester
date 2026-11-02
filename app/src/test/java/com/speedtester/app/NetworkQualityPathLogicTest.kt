@@ -20,8 +20,8 @@ class NetworkQualityPathLogicTest {
         val nodes = NetworkQualityPathLogic.build(wifi, report(204), false, "Complete")
         assertEquals(QualityPathState.UNMEASURED, nodes[2].state)
         assertEquals(QualityPathState.UNMEASURED, nodes[3].state)
-        assertEquals("Detected", nodes[2].detail)
-        assertEquals("Not probed", nodes[3].detail)
+        assertEquals("Not verified", nodes[2].detail)
+        assertEquals("Not verified", nodes[3].detail)
         assertEquals(QualityPathState.SUCCESS, nodes[4].state)
     }
 

@@ -103,6 +103,6 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(page.contains("network_quality_real_enabled"))
         assertFalse(page.contains("quality_message_room"))
         assertTrue(source("RealVideoProbe.kt").contains("MAX_VIDEO_BYTES = 24L * 1024 * 1024"))
-        assertTrue(source("RealNetworkProbes.kt").contains("No authenticated echo reply"))
+        assertTrue(source("RealProbeModels.kt").contains("No authenticated echo reply"))
     }
 }
