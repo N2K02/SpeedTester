@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.TrafficStats
+import android.os.Process
 import android.net.wifi.WifiInfo
 import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
@@ -67,6 +69,10 @@ object NetworkQualityRunner {
         val network = cm.activeNetwork
         val snapshot = access(app)
         val started = System.currentTimeMillis()
+        val wallStart = SystemClock.elapsedRealtime()
+        val cpuStart = Process.getElapsedCpuTime()
+        val rxStart = TrafficStats.getUidRxBytes(Process.myUid())
+        val txStart = TrafficStats.getUidTxBytes(Process.myUid())
         if (network == null) {
             val empty = QualitySample(null, null, 0, 0, null, "No active network")
             return QualityReport(started, profile, snapshot, empty, emptyList(), null,
@@ -131,9 +137,17 @@ object NetworkQualityRunner {
         }
         checkNetwork()
         val tcp = NetworkQualityLogic.evaluate(tcpSamples)
+        val rxEnd = TrafficStats.getUidRxBytes(Process.myUid())
+        val txEnd = TrafficStats.getUidTxBytes(Process.myUid())
+        val traffic = if (minOf(rxStart, txStart, rxEnd, txEnd) < 0 ||
+            rxEnd < rxStart || txEnd < txStart) null
+            else (rxEnd - rxStart) + (txEnd - txStart)
         return QualityReport(started, profile, snapshot, tcp, endpointResults,
             QualityReportLogic.overall(tcp, endpointResults),
-            QualityReportLogic.findings(snapshot, tcp, endpointResults))
+            QualityReportLogic.findings(snapshot, tcp, endpointResults),
+            durationMs = SystemClock.elapsedRealtime() - wallStart,
+            processCpuMs = Process.getElapsedCpuTime() - cpuStart,
+            appTrafficBytes = traffic)
     }
 
     private fun connect(network: Network): Long? {
