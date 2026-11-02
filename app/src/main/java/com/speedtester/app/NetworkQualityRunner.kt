@@ -98,7 +98,10 @@ object NetworkQualityRunner {
         // Connections use the selected Android Network rather than switching to mobile data on Wi-Fi failure.
         val client = OkHttpClient.Builder()
             .socketFactory(network.socketFactory)
-            .dns(Dns { host -> network.getAllByName(host).toList() })
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<java.net.InetAddress> =
+                    network.getAllByName(hostname).toList()
+            })
             .connectTimeout(1500, TimeUnit.MILLISECONDS)
             .readTimeout(1800, TimeUnit.MILLISECONDS)
             .callTimeout(2800, TimeUnit.MILLISECONDS)
