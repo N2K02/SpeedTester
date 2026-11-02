@@ -125,6 +125,13 @@ class NetworkQualityLogicTest {
             QualityReportLogic.overall(tcp, listOf(full))!!)
     }
 
+    @Test fun unmeasuredHopsAreInformationalInsteadOfHealthy() {
+        val access = QualityAccess("Wi-Fi", -55, 5180, "192.168.0.1", true)
+        val tcp = NetworkQualityLogic.evaluate(listOf(10L, 11L, 12L))
+        val findings = QualityReportLogic.findings(access, tcp, listOf(endpoint("Internet", 204)))
+        assertTrue(findings.any { it.informational && it.text.contains("not actively measured") })
+    }
+
     @Test fun testProfilesHaveStrictBoundedProbeBudgets() {
         assertEquals(3, QualityProfile.QUICK.tcpSamples)
         assertTrue(QualityProfile.STANDARD.tcpSamples <= 5)
