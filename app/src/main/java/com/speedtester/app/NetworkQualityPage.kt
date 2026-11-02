@@ -6,7 +6,17 @@ import android.net.Network
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -18,6 +28,17 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.CheckCircleOutline
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,7 +55,7 @@ import java.util.Locale
 
 /** A single, manual-only test page. Leaving the page disposes the scope and stops the test. */
 @Composable
-fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier, onViewHistory: () -> Unit = {}) {
+fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val preferences = remember(context) {
         context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)
@@ -136,264 +157,536 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier, onViewHi
         }
     }
     val score = report?.score
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.fillMaxWidth().padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+    val path = NetworkQualityPathLogic.build(access, report, running, stage)
+    val measuredEndpoints = report?.endpoints.orEmpty()
+    val findings = report?.let { QualityScenarioLogic.evaluate(it) }.orEmpty()
+    var expandedDiagnostics by remember { mutableStateOf(false) }
+
+    // Preserve the shared mRadio-style Activity header. The test is manual-only.
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                QualityHeroCard(
+                    score = score, progress = progress, running = running, stage = stage,
+                    report = report, access = access
+                )
+            }
+            item {
+                QualityNetworkPathCard(path = path, running = running)
+            }
+            item {
+                QualityServiceCard(measuredEndpoints, running, stage)
+            }
+            item {
+                QualityMeasurementStrip(report)
+            }
+            item {
+                Surface(
+                    color = QualitySurface,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("OVERALL CONNECTION QUALITY",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Box(Modifier.size(164.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { (score ?: 0).coerceIn(0, 100) / 100f },
-                            modifier = Modifier.fillMaxSize(),
-                            strokeWidth = 10.dp,
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                        )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(score?.toString() ?: "—", style = MaterialTheme.typography.displayLarge,
-                                fontWeight = FontWeight.Bold)
-                            Text(if (score == null) "Not rated" else "/ 100",
-                                style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                    Text(if (running) "Testing…" else if (report == null) "Ready to test"
-                        else NetworkQualityLogic.label(score), style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Text(
-                        if (running) stage else "Estimated TCP + HTTPS responsiveness · not a speed test",
-                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                    if (running) {
-                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                        OutlinedButton(onClick = cancelTest, modifier = Modifier.fillMaxWidth()) {
-                            Text("Cancel test")
-                        }
-                    } else {
-                        Button(onClick = startTest, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.NetworkCheck, null, modifier = Modifier.size(18.dp))
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Wifi, null, tint = QualityBlue, modifier = Modifier.size(19.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(if (report == null) "Run network quality test" else "Test again")
+                            Text("Network info", color = Color.White,
+                                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f))
+                            QualityPill(
+                                text = if (access.androidValidated) "Validated" else "Not validated",
+                                tint = if (access.androidValidated) QualityGreen else QualityAmber
+                            )
                         }
-                        if (report != null) {
-                            TextButton(onClick = onViewHistory) {
-                                Text("View results in Test History")
+                        Text(
+                            "${access.transport}" +
+                                (access.frequencyMhz?.let { " · ${QualityReportLogic.wifiBand(it)}" } ?: "") +
+                                (access.signalDbm?.let { " · $it dBm" } ?: "") +
+                                " · Gateway ${if (access.gateway == null) "unknown" else "detected"}",
+                            color = QualityMuted, style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+            item {
+                Surface(
+                    color = QualitySurface, shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Test profile", style = MaterialTheme.typography.titleSmall,
+                                color = Color.White, modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.SemiBold)
+                            QualityPill(
+                                text = if (running) "Testing" else "Manual only",
+                                tint = if (running) QualityViolet else QualityBlue
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            QualityProfile.entries.forEach { option ->
+                                FilterChip(
+                                    selected = profile == option,
+                                    onClick = {
+                                        profile = option
+                                        preferences.edit().putString("network_quality_profile", option.name).apply()
+                                    },
+                                    enabled = !running,
+                                    modifier = Modifier.weight(1f).height(39.dp),
+                                    label = {
+                                        Text(option.name.lowercase().replaceFirstChar { it.uppercase() },
+                                            maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = QualityViolet.copy(alpha = .25f),
+                                        selectedLabelColor = Color.White,
+                                        containerColor = QualitySurfaceRaised,
+                                        labelColor = QualityMuted
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = profile == option,
+                                        selectedBorderColor = QualityViolet,
+                                        borderColor = QualityLine
+                                    )
+                                )
                             }
                         }
+                        Text("Small, bounded TCP and HTTPS checks. No video downloads or background stress tests.",
+                            color = QualityMuted, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
+            if (report != null) item {
+                Surface(
+                    color = QualitySurface, shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Scenario diagnostics", style = MaterialTheme.typography.titleSmall,
+                                color = Color.White, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f))
+                            TextButton(onClick = { expandedDiagnostics = !expandedDiagnostics },
+                                contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                Text(if (expandedDiagnostics) "Less" else "All ${findings.size}",
+                                    color = QualityVioletLight, style = MaterialTheme.typography.labelSmall)
+                                Icon(if (expandedDiagnostics) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    null, modifier = Modifier.size(18.dp), tint = QualityVioletLight)
+                            }
+                        }
+                        val relevant = if (expandedDiagnostics) findings else
+                            findings.filter {
+                                it.state == QualityScenarioState.CAUTION ||
+                                    it.state == QualityScenarioState.UNKNOWN
+                            }.take(3).ifEmpty { findings.take(2) }
+                        relevant.forEach { scenario ->
+                            QualityScenarioRow(scenario)
+                        }
+                        if (!expandedDiagnostics) {
+                            Text("More measured scenarios are available in Test History → Network Quality.",
+                                color = QualityMuted, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+            if (failure != null && !running) item {
+                Surface(color = QualityRed.copy(alpha = .13f), shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ErrorOutline, null, tint = QualityRed, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(failure!!, color = QualityRed, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            item {
+                Text(
+                    "Website checks test HTTPS reachability, not video playback, gameplay or message delivery. " +
+                        "TCP failures are not ICMP/UDP packet loss. Gateway and ISP hops are not probed. " +
+                        "App traffic includes other SpeedTester activity during the test.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp)
+                )
+            }
         }
-        item {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                    Text("NETWORK PATH", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        QualityPathStep(access.transport, access.transport != "Disconnected", Modifier.weight(1f))
-                        // A detected gateway is not equivalent to a successful hop test.
-                        QualityPathStep("Gateway", null, Modifier.weight(1f))
-                        QualityPathStep("ISP", null, Modifier.weight(1f))
-                        QualityPathStep("Internet",
-                            report?.endpoints?.firstOrNull { it.service == "Internet" }?.responded,
-                            Modifier.weight(1f))
-                    }
-                    HorizontalDivider()
-                    Text("Access: ${access.transport}" + (access.signalDbm?.let { " · $it dBm" } ?: ""),
-                        style = MaterialTheme.typography.bodyMedium)
-                    Text("Gateway: ${if (access.gateway == null) "Not identified" else "Detected (not probed)"}",
-                        style = MaterialTheme.typography.bodySmall)
-                    Text("Android internet validation: ${if (access.androidValidated) "Validated" else "Not validated"}",
-                        style = MaterialTheme.typography.bodySmall)
-                    if (access.frequencyMhz != null) {
-                        Text("Wi-Fi band: ${QualityReportLogic.wifiBand(access.frequencyMhz)}", 
-                            style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text("Gateway and ISP hops are unmeasured; neutral icons do not mean a failure.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        // Exactly one primary action, pinned so it is reachable without scrolling.
+        Surface(shadowElevation = 5.dp, color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (running) {
+                    LinearProgressIndicator(progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(3.dp),
+                        color = QualityViolet, trackColor = QualityLine)
+                    Spacer(Modifier.height(6.dp))
+                }
+                Button(
+                    onClick = { if (running) cancelTest() else startTest() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (running) QualitySurfaceRaised else QualityViolet,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(17.dp)
+                ) {
+                    Icon(if (running) Icons.Default.Close else Icons.Default.PlayArrow,
+                        contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (running) "Cancel network test" else "Run network test",
+                        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 }
             }
         }
-        item {
-            Text("SERVICE ENDPOINTS", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Browsing", "Streaming", "Gaming", "WhatsApp").chunked(2).forEach { pair ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        pair.forEach { name ->
-                            val endpoint = report?.endpoints?.firstOrNull { it.service == name }
-                            ElevatedCard(modifier = Modifier.weight(1f)) {
-                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Icon(when (name) {
-                                            "Browsing" -> Icons.Default.Public
-                                            "Streaming" -> Icons.Default.SmartDisplay
-                                            "Gaming" -> Icons.Default.SportsEsports
-                                            else -> Icons.Default.Chat
-                                        }, contentDescription = null, modifier = Modifier.size(19.dp),
-                                            tint = MaterialTheme.colorScheme.primary)
-                                        Text(name, style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold)
-                                    }
-                                    Text(endpoint?.status ?: "Not tested",
-                                        color = if (endpoint?.usable == true) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodyMedium)
-                                    Text(endpoint?.latencyMs?.let { "$it ms HTTPS" } ?: "—",
-                                        style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+private val QualitySurface = Color(0xFF14223B)
+private val QualitySurfaceRaised = Color(0xFF253453)
+private val QualityLine = Color(0xFF405071)
+private val QualityMuted = Color(0xFFB7C4DF)
+private val QualityGreen = Color(0xFF3EF3A2)
+private val QualityAmber = Color(0xFFFFD36B)
+private val QualityRed = Color(0xFFFF707C)
+private val QualityViolet = Color(0xFF7254EF)
+private val QualityVioletLight = Color(0xFFC0B5FF)
+private val QualityBlue = Color(0xFF6EDBFF)
+private val QualityCyan = Color(0xFF54EEE4)
+
+@Composable
+private fun QualityPill(text: String, tint: Color, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = tint.copy(alpha = .16f),
+        shape = RoundedCornerShape(40.dp)
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            color = tint,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun QualityHeroCard(
+    score: Int?,
+    progress: Float,
+    running: Boolean,
+    stage: String,
+    report: QualityReport?,
+    access: QualityAccess
+) {
+    val ratingColor = when {
+        score == null -> QualityVioletLight
+        score >= 75 -> QualityGreen
+        score >= 40 -> QualityAmber
+        else -> QualityRed
+    }
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(Color(0xFF08566A), Color(0xFF0F394A), Color(0xFF093D39))
+                ),
+                shape = RoundedCornerShape(21.dp)
+            )
+            .padding(15.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Box(Modifier.size(112.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        progress = { if (running) progress else (score ?: 0) / 100f },
+                        color = ratingColor,
+                        trackColor = Color.White.copy(alpha = .18f),
+                        strokeWidth = 9.dp,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                        Text(if (score == null) "—" else "$score",
+                            color = Color.White, fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.headlineLarge)
+                        Text(if (score == null) "NOT RATED" else "/ 100",
+                            color = QualityMuted, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("Network Quality", color = Color.White,
+                        fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                    QualityPill(
+                        when {
+                            running -> "TESTING"
+                            report == null -> "READY"
+                            score == null -> "NOT RATED"
+                            else -> NetworkQualityLogic.label(score)
+                        }, ratingColor
+                    )
+                    Text(when {
+                        running -> stage
+                        report == null -> "Run a test to assess connection responsiveness"
+                        score == null -> "No sufficient HTTPS data to assign a score"
+                        else -> "TCP + HTTPS responsiveness estimate"
+                    }, color = QualityMuted, style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(access.transport + (access.frequencyMhz?.let {
+                        " · " + QualityReportLogic.wifiBand(it)
+                    } ?: ""), color = Color.White.copy(alpha = .85f),
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            val successes = report?.endpoints?.sumOf { it.responses }
+            if (successes != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    QualityPill("${report.endpoints.sumOf { it.responses }}/${report.endpoints.sumOf { it.attempted }} HTTPS",
+                        if (successes > 0) QualityGreen else QualityRed)
+                    QualityPill("${report.tcp.successes}/${report.tcp.attempts} TCP",
+                        if (report.tcp.successes == report.tcp.attempts) QualityGreen else QualityAmber)
+                }
+            } else if (running) {
+                Text("Checking real connection stages · ${(progress * 100).toInt().coerceIn(0, 100)}%",
+                    style = MaterialTheme.typography.labelSmall, color = QualityMuted)
+            }
+        }
+    }
+}
+
+private fun pathTint(state: QualityPathState): Color = when (state) {
+    QualityPathState.SUCCESS -> QualityGreen
+    QualityPathState.FAILED -> QualityRed
+    QualityPathState.TESTING -> QualityVioletLight
+    QualityPathState.PENDING -> QualityMuted
+    QualityPathState.UNMEASURED -> QualityAmber
+}
+
+@Composable
+private fun QualityNetworkPathCard(path: List<QualityPathNode>, running: Boolean) {
+    Surface(color = QualitySurface, shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.NetworkCheck, null, modifier = Modifier.size(19.dp), tint = QualityBlue)
+                Spacer(Modifier.width(7.dp))
+                Text("Network path", color = Color.White,
+                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                QualityPill(
+                    text = if (running) "CHECKING" else if (path.last().state == QualityPathState.SUCCESS)
+                        "CONNECTED" else if (path.last().state == QualityPathState.FAILED) "NO REPLY" else "READY",
+                    tint = pathTint(path.last().state)
+                )
+            }
+            Box(Modifier.fillMaxWidth().height(83.dp)) {
+                Canvas(Modifier.fillMaxWidth().height(40.dp)) {
+                    val count = path.size
+                    val first = size.width / count / 2f
+                    val dx = size.width / count
+                    val y = 20.dp.toPx()
+                    val circleEdge = 18.dp.toPx()
+                    for (index in 0 until count - 1) {
+                        val from = path[index]
+                        val to = path[index + 1]
+                        val tint = when {
+                            to.state == QualityPathState.FAILED -> QualityRed
+                            to.state == QualityPathState.TESTING -> QualityVioletLight
+                            from.state == QualityPathState.SUCCESS && to.state == QualityPathState.SUCCESS -> QualityGreen
+                            else -> QualityLine
+                        }
+                        drawLine(color = tint,
+                            start = Offset(first + index * dx + circleEdge, y),
+                            end = Offset(first + (index + 1) * dx - circleEdge, y),
+                            strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+                    }
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    path.forEach { node ->
+                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(38.dp).background(
+                                    QualitySurfaceRaised, CircleShape), contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        when (node.id) {
+                                            "device" -> Icons.Default.Smartphone
+                                            "link" -> Icons.Default.Wifi
+                                            "gateway" -> Icons.Default.Router
+                                            "isp" -> Icons.Default.Public
+                                            else -> Icons.Default.Cloud
+                                        },
+                                        contentDescription = null, modifier = Modifier.size(21.dp),
+                                        tint = Color.White
+                                    )
+                                }
+                                Box(Modifier.align(Alignment.BottomEnd).size(16.dp).background(
+                                    pathTint(node.state), CircleShape),
+                                    contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        when (node.state) {
+                                            QualityPathState.SUCCESS -> Icons.Default.CheckCircle
+                                            QualityPathState.FAILED -> Icons.Default.Close
+                                            QualityPathState.TESTING -> Icons.Default.NetworkCheck
+                                            else -> Icons.Default.Info
+                                        },
+                                        contentDescription = node.state.name,
+                                        tint = QualitySurface, modifier = Modifier.size(12.dp)
+                                    )
                                 }
                             }
+                            Text(node.title, style = MaterialTheme.typography.labelSmall,
+                                color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(node.detail, style = MaterialTheme.typography.labelSmall,
+                                color = pathTint(node.state),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
             }
-            Text("These checks measure website endpoint reachability only, not actual video playback, gameplay or message delivery.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp))
-        }
-        item {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("MEASUREMENTS", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    QualityMetric("TCP connect median", report?.tcp?.latencyMs?.let { "$it ms" } ?: "—")
-                    QualityMetric("TCP timing variation", report?.tcp?.jitterMs?.let { "%.1f ms".format(Locale.US, it) } ?: "—")
-                    QualityMetric("TCP successes", report?.tcp?.let { "${it.successes}/${it.attempts}" } ?: "—")
-                    QualityMetric("DNS resolution", report?.dnsLookupMs?.let { "$it ms" } ?: "Not measured")
-                    QualityMetric("TLS handshake", report?.tlsHandshakeMs?.let { "$it ms" } ?: "Not measured")
-                    QualityMetric("HTTPS responses", report?.endpoints?.let { endpoints ->
-                        "${endpoints.sumOf { it.responses }}/${endpoints.sumOf { it.attempted }}"
-                    } ?: "—")
-                    QualityMetric("Test duration", report?.durationMs?.let { "%.1f s".format(Locale.US, it / 1000.0) } ?: "—")
-                    QualityMetric("Process CPU time", report?.processCpuMs?.let { "$it ms" } ?: "—")
-                    QualityMetric("App traffic (approx.)", report?.appTrafficBytes?.let {
-                        "%.1f KiB".format(Locale.US, it / 1024.0)
-                    } ?: "—")
-                    Text("Traffic counter includes other SpeedTester activity during this interval.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Restricted website responses do not indicate packet loss or ISP failure.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("TCP connection failures are not ICMP/UDP packet loss.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-        if (report != null) {
-            item {
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("WHAT WE FOUND", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        report!!.findings.forEach { finding ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                Icon(when {
-                                    finding.informational -> Icons.Default.Info
-                                    finding.positive -> Icons.Default.CheckCircle
-                                    else -> Icons.Default.Warning
-                                }, contentDescription = null, modifier = Modifier.size(19.dp),
-                                    tint = when {
-                                        finding.informational -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        finding.positive -> MaterialTheme.colorScheme.primary
-                                        else -> MaterialTheme.colorScheme.error
-                                    })
-                                Text(finding.text, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("TEST PROFILE", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()) {
-                        QualityProfile.entries.forEach { option ->
-                            FilterChip(selected = profile == option, onClick = {
-                                profile = option
-                                preferences.edit().putString("network_quality_profile", option.name).apply()
-                            },
-                                enabled = !running,
-                                label = { Text(option.name.lowercase().replaceFirstChar { it.uppercase() },
-                                    style = MaterialTheme.typography.labelSmall) })
-                        }
-                    }
-                    Text("Only manual, low-data probes. Detailed adds samples; none performs a bandwidth or streaming stress test.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Press Run above to perform the selected profile. Results are also saved under Test History → Network Quality.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-        if (failure != null && !running) item {
-            Text(failure!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        if (report != null) item {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("SCENARIO CHECKS", style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    QualityScenarioLogic.evaluate(report!!).forEach { scenario ->
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(scenario.title + " · " + scenario.state.name.lowercase().replaceFirstChar { it.uppercase() },
-                                style = MaterialTheme.typography.titleSmall)
-                            Text(scenario.detail, style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
+            Text("Green: observed · Red: failed · Purple: testing · Amber: not probed",
+                color = QualityMuted, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
 
 @Composable
-private fun QualityPathStep(label: String, healthy: Boolean?, modifier: Modifier = Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Surface(shape = CircleShape,
-            color = when (healthy) {
-                true -> MaterialTheme.colorScheme.primaryContainer
-                false -> MaterialTheme.colorScheme.errorContainer
-                null -> MaterialTheme.colorScheme.surfaceContainerHighest
-            }, modifier = Modifier.size(34.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(when (healthy) {
-                    true -> Icons.Default.CheckCircle
-                    false -> Icons.Default.Warning
-                    null -> Icons.Default.Info
-                }, contentDescription = null, modifier = Modifier.size(19.dp))
+private fun QualityServiceCard(
+    endpoints: List<QualityEndpoint>,
+    running: Boolean,
+    stage: String
+) {
+    val services = listOf(
+        Triple("Browsing", Icons.Default.Public, QualityGreen),
+        Triple("Streaming", Icons.Default.SmartDisplay, QualityVioletLight),
+        Triple("Gaming", Icons.Default.SportsEsports, QualityAmber),
+        Triple("WhatsApp", Icons.Default.Chat, QualityCyan)
+    )
+    Surface(color = QualitySurface, shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Test scenarios", style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold, color = Color.White,
+                    modifier = Modifier.weight(1f))
+                QualityPill("HTTPS endpoints", QualityBlue)
             }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                services.forEach { (name, icon, tint) ->
+                    val endpoint = endpoints.firstOrNull { it.service == name }
+                    val testing = running && stage.startsWith(name)
+                    val text = when {
+                        endpoint?.usable == true -> "Reachable"
+                        endpoint?.responded == true -> "Restricted"
+                        endpoint != null -> "No reply"
+                        testing -> "Testing"
+                        else -> "Untested"
+                    }
+                    val stateColor = when {
+                        endpoint?.usable == true -> QualityGreen
+                        endpoint?.responded == true -> QualityAmber
+                        endpoint != null -> QualityRed
+                        testing -> QualityVioletLight
+                        else -> QualityMuted
+                    }
+                    Surface(
+                        color = tint.copy(alpha = .12f), shape = RoundedCornerShape(13.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 3.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Icon(icon, contentDescription = null, tint = tint,
+                                modifier = Modifier.size(22.dp))
+                            Text(if (name == "WhatsApp") "Chat" else name,
+                                color = Color.White, style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                            Text(endpoint?.latencyMs?.let { "$it ms" } ?: "—",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold, color = Color.White)
+                            QualityPill(text, stateColor)
+                        }
+                    }
+                }
+            }
+            Text("Website reachability only; not actual video playback, gameplay or message delivery.",
+                color = QualityMuted, style = MaterialTheme.typography.labelSmall)
         }
-        Text(label, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
-            maxLines = 2)
     }
 }
 
 @Composable
-private fun QualityMetric(name: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically) {
-        Text(name, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+private fun QualityMeasurementStrip(report: QualityReport?) {
+    val metrics = listOf(
+        Triple("TCP", report?.tcp?.latencyMs?.let { "$it ms" } ?: "—", QualityBlue),
+        Triple("Variation", report?.tcp?.jitterMs?.let {
+            "%.1f ms".format(Locale.US, it)
+        } ?: "—", QualityVioletLight),
+        Triple("DNS", report?.dnsLookupMs?.let { "$it ms" } ?: "—", QualityCyan),
+        Triple("TLS", report?.tlsHandshakeMs?.let { "$it ms" } ?: "—", QualityAmber)
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        metrics.forEach { (label, value, tint) ->
+            Surface(
+                color = QualitySurface, shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(Modifier.padding(horizontal = 5.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = tint,
+                        maxLines = 1)
+                    Text(value, style = MaterialTheme.typography.titleSmall, color = Color.White,
+                        fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        }
+    }
+    if (report != null) {
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "${report.tcp.successes}/${report.tcp.attempts} TCP · " +
+                "${report.endpoints.sumOf { it.responses }}/${report.endpoints.sumOf { it.attempted }} HTTPS · " +
+                "${(report.durationMs / 1000f).let { "%.1f".format(Locale.US, it) }}s · " +
+                "${report.processCpuMs?.let { "$it ms CPU" } ?: "CPU unavailable"}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 5.dp)
+        )
+    }
+}
+
+@Composable
+private fun QualityScenarioRow(scenario: QualityScenarioResult) {
+    val tint = when (scenario.state) {
+        QualityScenarioState.GOOD -> QualityGreen
+        QualityScenarioState.CAUTION -> QualityRed
+        QualityScenarioState.INFORMATIONAL -> QualityAmber
+        QualityScenarioState.UNKNOWN -> QualityMuted
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(
+            when (scenario.state) {
+                QualityScenarioState.GOOD -> Icons.Default.CheckCircleOutline
+                QualityScenarioState.CAUTION -> Icons.Default.ErrorOutline
+                else -> Icons.Default.Info
+            }, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(scenario.title, color = Color.White, style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold)
+            Text(scenario.detail, color = QualityMuted, style = MaterialTheme.typography.labelSmall,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        QualityPill(scenario.state.name.lowercase().replaceFirstChar { it.uppercase() }, tint)
     }
 }
