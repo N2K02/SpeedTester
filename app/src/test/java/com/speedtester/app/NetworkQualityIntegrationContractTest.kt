@@ -20,7 +20,7 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(main.contains("activeTab = networkQualityOrigin"))
         assertTrue(main.contains("networkQualityOrigin = 0; activeTab = 10"))
         assertTrue(main.contains("networkQualityOrigin = 3"))
-        assertTrue(main.contains("Card(onClick = { activeTab = 10 }"))
+        assertTrue(main.contains("Card(onClick = { networkQualityOrigin = 0; activeTab = 10 }"))
         val page = source("NetworkQualityPage.kt")
         assertFalse(page.contains("TopAppBar("))
         assertTrue(page.contains("N2K02Theme").not()) // central theme owns page styling
