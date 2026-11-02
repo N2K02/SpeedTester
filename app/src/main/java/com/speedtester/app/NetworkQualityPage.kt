@@ -9,6 +9,10 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +42,42 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     var job by remember { mutableStateOf<Job?>(null) }
 
     DisposableEffect(Unit) { onDispose { job?.cancel() } }
+    val startTest: () -> Unit = {
+        if (!running) {
+            // Set the flag before dispatching the coroutine so two fast taps cannot start parallel probes.
+            running = true
+            progress = 0f
+            stage = "Starting test"
+            failure = null
+            report = null  // A different network may now be selected; never show a previous quality grade.
+            access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
+            job = scope.launch {
+                try {
+                    val newReport = NetworkQualityRunner.run(context, profile) { name, done, total ->
+                        stage = "$name · $done/$total"
+                        progress = done.toFloat() / total.coerceAtLeast(1)
+                    }
+                    report = newReport
+                    access = newReport.access
+                    history = NetworkQualityHistory.save(context, newReport)
+                    stage = "Complete"
+                } catch (_: CancellationException) {
+                    stage = "Cancelled"
+                } catch (e: NetworkQualityRunner.NetworkChanged) {
+                    failure = e.message
+                } catch (e: Exception) {
+                    failure = "Unable to complete network test (${e.javaClass.simpleName})."
+                } finally {
+                    running = false
+                    job = null
+                }
+            }
+        }
+    }
+    val cancelTest: () -> Unit = {
+        stage = "Cancelling…"
+        job?.cancel()
+    }
     val score = report?.score
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -69,11 +109,24 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                                 style = MaterialTheme.typography.labelMedium)
                         }
                     }
-                    Text(NetworkQualityLogic.label(score), style = MaterialTheme.typography.titleLarge,
+                    Text(if (running) "Testing…" else if (report == null) "Ready to test"
+                        else NetworkQualityLogic.label(score), style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text(
                         if (running) stage else "Estimated TCP + HTTPS responsiveness · not a speed test",
                         style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                    if (running) {
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                        OutlinedButton(onClick = cancelTest, modifier = Modifier.fillMaxWidth()) {
+                            Text("Cancel test")
+                        }
+                    } else {
+                        Button(onClick = startTest, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.NetworkCheck, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (report == null) "Run network quality test" else "Test again")
+                        }
+                    }
                 }
             }
         }
@@ -84,9 +137,11 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         QualityPathStep(access.transport, access.transport != "Disconnected", Modifier.weight(1f))
-                        QualityPathStep("Gateway", access.gateway?.let { true }, Modifier.weight(1f))
-                        QualityPathStep("Android check", access.androidValidated, Modifier.weight(1f))
-                        QualityPathStep("HTTPS", report?.endpoints?.any { it.service == "Internet" && it.usable },
+                        // A detected gateway is not equivalent to a successful hop test.
+                        QualityPathStep("Gateway", null, Modifier.weight(1f))
+                        QualityPathStep("ISP", null, Modifier.weight(1f))
+                        QualityPathStep("Internet",
+                            report?.endpoints?.firstOrNull { it.service == "Internet" }?.responded,
                             Modifier.weight(1f))
                     }
                     HorizontalDivider()
@@ -94,7 +149,9 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                         style = MaterialTheme.typography.bodyMedium)
                     Text("Gateway: ${if (access.gateway == null) "Not identified" else "Detected (not probed)"}",
                         style = MaterialTheme.typography.bodySmall)
-                    Text("Intermediate ISP and international routes are not individually measured.",
+                    Text("Android internet validation: ${if (access.androidValidated) "Validated" else "Not validated"}",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("Gateway and ISP hops are unmeasured; neutral icons do not mean a failure.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -110,8 +167,18 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                             val endpoint = report?.endpoints?.firstOrNull { it.service == name }
                             ElevatedCard(modifier = Modifier.weight(1f)) {
                                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text(name, style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold)
+                                    Row(verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(when (name) {
+                                            "Browsing" -> Icons.Default.Public
+                                            "Streaming" -> Icons.Default.SmartDisplay
+                                            "Gaming" -> Icons.Default.SportsEsports
+                                            else -> Icons.Default.Chat
+                                        }, contentDescription = null, modifier = Modifier.size(19.dp),
+                                            tint = MaterialTheme.colorScheme.primary)
+                                        Text(name, style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold)
+                                    }
                                     Text(endpoint?.status ?: "Not tested",
                                         color = if (endpoint?.usable == true) MaterialTheme.colorScheme.primary
                                             else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -136,8 +203,8 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     QualityMetric("TCP connect median", report?.tcp?.latencyMs?.let { "$it ms" } ?: "—")
                     QualityMetric("TCP timing variation", report?.tcp?.jitterMs?.let { "%.1f ms".format(Locale.US, it) } ?: "—")
                     QualityMetric("TCP successes", report?.tcp?.let { "${it.successes}/${it.attempts}" } ?: "—")
-                    QualityMetric("HTTPS successes", report?.endpoints?.let { endpoints ->
-                        "${endpoints.sumOf { it.successful }}/${endpoints.sumOf { it.attempted }}"
+                    QualityMetric("HTTPS responses", report?.endpoints?.let { endpoints ->
+                        "${endpoints.sumOf { it.responses }}/${endpoints.sumOf { it.attempted }}"
                     } ?: "—")
                     QualityMetric("Test duration", report?.durationMs?.let { "%.1f s".format(Locale.US, it / 1000.0) } ?: "—")
                     QualityMetric("Process CPU time", report?.processCpuMs?.let { "$it ms" } ?: "—")
@@ -145,6 +212,9 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                         "%.1f KiB".format(Locale.US, it / 1024.0)
                     } ?: "—")
                     Text("Traffic counter includes other SpeedTester activity during this interval.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Restricted website responses do not indicate packet loss or ISP failure.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("TCP connection failures are not ICMP/UDP packet loss.",
@@ -195,35 +265,11 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                             style = MaterialTheme.typography.bodySmall)
                     }
                     if (running) {
-                        OutlinedButton(onClick = { job?.cancel(); stage = "Cancelled" },
-                            modifier = Modifier.fillMaxWidth()) { Text("Cancel test") }
+                        OutlinedButton(onClick = cancelTest, modifier = Modifier.fillMaxWidth()) {
+                            Text("Cancel test")
+                        }
                     } else {
-                        Button(onClick = {
-                            job = scope.launch {
-                                running = true
-                                progress = 0f
-                                failure = null
-                                stage = "Starting test"
-                                try {
-                                    val newReport = NetworkQualityRunner.run(context, profile) { name, done, total ->
-                                        stage = "$name · $done/$total"
-                                        progress = done.toFloat() / total.coerceAtLeast(1)
-                                    }
-                                    report = newReport
-                                    access = newReport.access
-                                    history = NetworkQualityHistory.save(context, newReport)
-                                    stage = "Complete"
-                                } catch (_: CancellationException) {
-                                    stage = "Cancelled"
-                                } catch (e: NetworkQualityRunner.NetworkChanged) {
-                                    failure = e.message
-                                } catch (e: Exception) {
-                                    failure = "Unable to complete network test (${e.javaClass.simpleName})."
-                                } finally {
-                                    running = false
-                                }
-                            }
-                        }, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = startTest, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.NetworkCheck, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(if (report == null) "Run network quality test" else "Test again")
