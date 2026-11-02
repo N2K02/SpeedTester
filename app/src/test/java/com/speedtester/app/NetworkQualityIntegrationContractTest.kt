@@ -93,5 +93,16 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(page.contains("QualityScenarioRow(scenario)"))
         assertTrue(page.contains("runCatching { NetworkQualityRunner.access(context) }"))
         assertTrue(runner.contains("TrafficStats.getUidRxBytes"))
+        assertTrue(runner.contains("RealVideoProbe.run("))
+        assertTrue(runner.contains("RealNetworkProbes.gateway("))
+        assertTrue(runner.contains("RealNetworkProbes.route("))
+        assertTrue(runner.contains("RealNetworkProbes.udp("))
+        assertTrue(runner.contains("RealNetworkProbes.messageRelay("))
+        assertTrue(page.contains("PlayerView(context)"))
+        assertTrue(page.contains("quality_udp_host"))
+        assertTrue(page.contains("network_quality_real_enabled"))
+        assertFalse(page.contains("quality_message_room"))
+        assertTrue(source("RealVideoProbe.kt").contains("MAX_VIDEO_BYTES = 24L * 1024 * 1024"))
+        assertTrue(source("RealNetworkProbes.kt").contains("No authenticated echo reply"))
     }
 }

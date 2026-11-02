@@ -152,7 +152,28 @@ private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Mod
                                 QualityHistoryScenarioRow(scenario)
                             }
                         }
-                        Text("Endpoint checks do not measure gameplay, video playback or WhatsApp delivery.",
+                        if (item.realTests.isNotEmpty()) {
+                            HorizontalDivider()
+                            Text("Measured real-world scenarios",
+                                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            item.realTests.forEach { outcome ->
+                                val accent = when (outcome.state) {
+                                    RealProbeState.VERIFIED -> MaterialTheme.colorScheme.primary
+                                    RealProbeState.DEGRADED -> MaterialTheme.colorScheme.tertiary
+                                    RealProbeState.UNAVAILABLE -> MaterialTheme.colorScheme.error
+                                    RealProbeState.NOT_CONFIGURED -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Text(outcome.title + " · " + outcome.state.name,
+                                    color = accent, style = MaterialTheme.typography.titleSmall)
+                                Text(outcome.detail, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (outcome.rxBytes != null || outcome.txBytes != null) {
+                                    Text("App RX ${outcome.rxBytes ?: 0} B · TX ${outcome.txBytes ?: 0} B (approx.)",
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                        Text("Website checks alone do not measure gameplay, video playback or WhatsApp delivery.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = { deleteTarget = item.timestamp },

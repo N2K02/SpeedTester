@@ -13,6 +13,7 @@ class NetworkQualityHistoryCodecTest {
         assertNull(items.first().dnsMs)
         assertNull(items.first().tlsMs)
         assertTrue(items.first().scenarios.isEmpty())
+        assertTrue(items.first().realTests.isEmpty())
     }
 
     @Test fun scenariosAndAllMeasuredFieldsRoundtrip() {
@@ -31,7 +32,11 @@ class NetworkQualityHistoryCodecTest {
             cpuMs = 40,
             trafficBytes = 2560,
             scenarios = listOf(QualityScenarioResult("tls", "TLS handshake",
-                QualityScenarioState.GOOD, "120 ms"))
+                QualityScenarioState.GOOD, "120 ms")),
+            realTests = listOf(RealProbeResult(
+                "video", "4K playback", RealProbeState.VERIFIED,
+                "3840x2160 decoded, 7s played", 3_000_000L, 50_000L
+            ))
         )
         val restored = QualityHistoryCodec.decode(QualityHistoryCodec.encode(listOf(item)))
         assertEquals(item, restored.single())

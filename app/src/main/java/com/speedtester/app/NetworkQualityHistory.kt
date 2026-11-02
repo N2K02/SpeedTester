@@ -19,7 +19,8 @@ data class QualityHistoryItem(
     val durationMs: Long? = null,
     val cpuMs: Long? = null,
     val trafficBytes: Long? = null,
-    val scenarios: List<QualityScenarioResult> = emptyList()
+    val scenarios: List<QualityScenarioResult> = emptyList(),
+    val realTests: List<RealProbeResult> = emptyList()
 )
 
 /** Backward-compatible, bounded JSON codec so old compact quality results remain visible. */
@@ -42,6 +43,21 @@ internal object QualityHistoryCodec {
                 QualityScenarioResult(id, obj.optString("title").take(80),
                     state, obj.optString("detail").take(300))
             }
+            val realArray = item.optJSONArray("realTests") ?: JSONArray()
+            val realTests = (0 until minOf(realArray.length(), 5)).mapNotNull { idx ->
+                val obj = realArray.optJSONObject(idx) ?: return@mapNotNull null
+                val id = obj.optString("id").take(32)
+                if (id.isBlank()) return@mapNotNull null
+                val state = runCatching {
+                    RealProbeState.valueOf(obj.optString("state"))
+                }.getOrDefault(RealProbeState.UNAVAILABLE)
+                fun bytes(key: String) = obj.optLong(key).takeIf {
+                    obj.has(key) && it >= 0
+                }
+                RealProbeResult(id, obj.optString("title").take(64),
+                    state, obj.optString("detail").take(350),
+                    bytes("rx"), bytes("tx"))
+            }
             fun long(name: String) = item.optLong(name).takeIf { item.has(name) && it >= 0 }
             fun int(name: String) = item.optInt(name, 0).coerceIn(0, 200)
             QualityHistoryItem(
@@ -60,7 +76,8 @@ internal object QualityHistoryCodec {
                 durationMs = long("duration"),
                 cpuMs = long("cpu"),
                 trafficBytes = long("traffic"),
-                scenarios = findings
+                scenarios = findings,
+                realTests = realTests
             )
         }.sortedByDescending { it.timestamp }
     }.getOrDefault(emptyList())
@@ -81,6 +98,18 @@ internal object QualityHistoryCodec {
                 item.durationMs?.let { put("duration", it) }
                 item.cpuMs?.let { put("cpu", it) }
                 item.trafficBytes?.let { put("traffic", it) }
+                put("realTests", JSONArray().apply {
+                    item.realTests.take(5).forEach { outcome ->
+                        put(JSONObject().apply {
+                            put("id", outcome.id.take(32))
+                            put("title", outcome.title.take(64))
+                            put("state", outcome.state.name)
+                            put("detail", outcome.detail.take(350))
+                            outcome.rxBytes?.let { put("rx", it) }
+                            outcome.txBytes?.let { put("tx", it) }
+                        })
+                    }
+                })
                 put("scenarios", JSONArray().apply {
                     item.scenarios.take(16).forEach { scenario ->
                         put(JSONObject().apply {
@@ -130,7 +159,8 @@ object NetworkQualityHistory {
             durationMs = report.durationMs,
             cpuMs = report.processCpuMs,
             trafficBytes = report.appTrafficBytes,
-            scenarios = QualityScenarioLogic.evaluate(report)
+            scenarios = QualityScenarioLogic.evaluate(report),
+            realTests = report.realTests
         )
         val items = (listOf(item) + load(context)).take(QualityHistoryCodec.LIMIT)
         context.getSharedPreferences("speedtester", Context.MODE_PRIVATE)

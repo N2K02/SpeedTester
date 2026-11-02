@@ -61,6 +61,18 @@ class NetworkQualityPathLogicTest {
         assertEquals(QualityPathState.UNMEASURED, nodes[2].state)
     }
 
+    @Test fun realGatewayAndRouteRepliesChangeOnlyMeasuredNodes() {
+        val report = report(204).copy(realTests = listOf(
+            RealProbeResult("gateway", "Gateway ICMP", RealProbeState.VERIFIED, "ICMP echo reply"),
+            RealProbeResult("isp", "ISP route", RealProbeState.VERIFIED, "TTL response")
+        ))
+        val nodes = NetworkQualityPathLogic.build(wifi, report, false, "Complete")
+        assertEquals(QualityPathState.SUCCESS, nodes[2].state)
+        assertEquals(QualityPathState.SUCCESS, nodes[3].state)
+        assertEquals("ICMP reply", nodes[2].detail)
+        assertEquals("TTL reply", nodes[3].detail)
+    }
+
     @Test fun mobileTransportDoesNotInventWifiDetails() {
         val mobile = QualityAccess("Mobile data", null, null, null, true)
         val nodes = NetworkQualityPathLogic.build(mobile, null, false, "Ready")
