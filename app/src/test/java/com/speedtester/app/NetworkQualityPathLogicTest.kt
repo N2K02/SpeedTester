@@ -69,6 +69,7 @@ class NetworkQualityPathLogicTest {
         val nodes = NetworkQualityPathLogic.build(wifi, report, false, "Complete")
         assertEquals(QualityPathState.SUCCESS, nodes[2].state)
         assertEquals(QualityPathState.SUCCESS, nodes[3].state)
+        assertEquals("Early route", nodes[3].title)
         assertEquals("ICMP reply", nodes[2].detail)
         assertEquals("TTL reply", nodes[3].detail)
     }
