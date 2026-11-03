@@ -332,13 +332,13 @@ private fun SpeedTesterApp(context: Context) {
                         selected = activeTab == 0,
                         onClick = { activeTab = 0; showUpdateDetails = false },
                         icon = { Icon(Icons.Default.NetworkCheck, null) },
-                        label = { Text("Home") },
+                        label = { Text("Speed") },
                     )
                     NavigationBarItem(
                         selected = activeTab == 10,
                         onClick = { activeTab = 10; showUpdateDetails = false },
                         icon = { Icon(Icons.Default.NetworkCheck, contentDescription = "Network Quality") },
-                        label = { Text("Quality") },
+                        label = { Text("Network") },
                         alwaysShowLabel = true,
                     )
                     NavigationBarItem(
