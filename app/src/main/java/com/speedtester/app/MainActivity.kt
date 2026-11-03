@@ -272,8 +272,8 @@ private fun SpeedTesterApp(context: Context) {
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
     BackHandler(enabled = activeTab == 10) { activeTab = 0 }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
-    BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
-    BackHandler(enabled = activeTab == 5 || activeTab == 9) { activeTab = 3 }
+    BackHandler(enabled = activeTab == 5 || activeTab == 6 || activeTab == 7) { activeTab = 0 }
+    BackHandler(enabled = activeTab == 9) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -342,7 +342,14 @@ private fun SpeedTesterApp(context: Context) {
                         alwaysShowLabel = true,
                     )
                     NavigationBarItem(
-                        selected = activeTab != 0 && activeTab != 10,
+                        selected = activeTab == 5,
+                        onClick = { activeTab = 5; showUpdateDetails = false },
+                        icon = { Icon(Icons.Default.Wifi, contentDescription = "Wi-Fi Analyser") },
+                        label = { Text("Wi-Fi") },
+                        alwaysShowLabel = true,
+                    )
+                    NavigationBarItem(
+                        selected = activeTab != 0 && activeTab != 10 && activeTab != 5,
                         onClick = { activeTab = 3; showUpdateDetails = false },
                         icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
                         label = { Text("Settings") },
@@ -852,12 +859,6 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 activeTab = 2
                             },
-                        )
-                        ListItem(
-                            headlineContent = { Text("Wi-Fi Analyser") },
-                            supportingContent = { Text("Nearby networks, live graphs and channel recommendations") },
-                            leadingContent = { Icon(Icons.Default.Wifi, null) },
-                            modifier = Modifier.clickable { activeTab = 5; showUpdateDetails = false },
                         )
                         HorizontalDivider()
                         
