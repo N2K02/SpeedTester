@@ -13,6 +13,10 @@ class SettingsConsistencyContractTest {
         val menu = source.substringAfter("3 -> if (!showUpdateDetails) LazyColumn(", "")
         assertTrue("Settings menu section must exist", menu.isNotBlank())
         assertTrue("Settings must have mRadio-style section heading", menu.contains("Manage your speed tests"))
+        assertTrue("Quality must be a primary menu item instead of a Settings submenu",
+            !menu.contains("headlineContent = { Text(\"Network Quality\") }"))
+        assertTrue("Network Quality bottom menu must exist",
+            source.contains("label = { Text(\"Quality\") }"))
         assertTrue("Settings should have aligned ListItems", menu.contains("headlineContent = { Text(\"Test history\") }"))
         assertTrue("Updates must remain available", menu.contains("headlineContent = { Text(\"About & updates\") }"))
         val divider = menu.indexOf("HorizontalDivider()")

@@ -85,7 +85,8 @@ class SpeedTesterDesignTest {
         val main = listOf(File("app/src/main/java/com/speedtester/app/MainActivity.kt"),
             File("src/main/java/com/speedtester/app/MainActivity.kt")).first { it.isFile }.readText()
         assertTrue(main.contains("lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED)"))
-        assertTrue(main.contains("LaunchedEffect(lifecycleOwner)"))
+        assertTrue(main.contains("LaunchedEffect(lifecycleOwner, activeTab)"))
+        assertTrue(main.contains("if (activeTab != 0 && activeTab != 7) return@LaunchedEffect"))
         assertTrue(main.contains("netInfo = readNetworkInfo(context)"))
         assertTrue(main.contains("kotlinx.coroutines.delay(2500)"))
         assertFalse(main.contains("LaunchedEffect(Unit) {\n        while (true) {\n            netInfo"))

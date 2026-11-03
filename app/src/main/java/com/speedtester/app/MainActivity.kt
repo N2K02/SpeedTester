@@ -199,13 +199,17 @@ private fun SpeedTesterApp(context: Context) {
     var probeCount by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
+    // History opens on speed results by default, or quality results when requested.
+    var historyInitialTab by remember { mutableIntStateOf(0) }
     var showUpdateDetails by remember { mutableStateOf(false) }
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
     var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
-    // No periodic network polling while the Activity is in the background.
-    LaunchedEffect(lifecycleOwner) {
+    // Poll only on pages displaying live network information, and only while foregrounded.
+    // Network Quality uses its own one-shot snapshot and must not incur idle polling.
+    LaunchedEffect(lifecycleOwner, activeTab) {
+        if (activeTab != 0 && activeTab != 7) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 netInfo = readNetworkInfo(context)
@@ -266,9 +270,10 @@ private fun SpeedTesterApp(context: Context) {
         return ok
     }
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
+    BackHandler(enabled = activeTab == 10) { activeTab = 0 }
     BackHandler(enabled = activeTab == 8) { selectedHistory = null; activeTab = 1 }
-    BackHandler(enabled = activeTab == 6 || activeTab == 7) { activeTab = 0 }
-    BackHandler(enabled = activeTab == 5 || activeTab == 9) { activeTab = 3 }
+    BackHandler(enabled = activeTab == 5 || activeTab == 6 || activeTab == 7) { activeTab = 0 }
+    BackHandler(enabled = activeTab == 9) { activeTab = 3 }
     BackHandler(enabled = activeTab == 3 && showUpdateDetails) { showUpdateDetails = false }
     BackHandler(enabled = activeTab == 1 || activeTab == 2) { activeTab = 3 }
     N2K02Theme {
@@ -282,6 +287,7 @@ private fun SpeedTesterApp(context: Context) {
                         ) {
                             Icon(
                                 when {
+                                    activeTab == 10 -> Icons.Default.NetworkCheck
                                     activeTab == 8 -> Icons.Default.History
                                     activeTab == 7 -> Icons.Default.NetworkCheck
                                     activeTab == 6 -> Icons.Default.Bolt
@@ -298,6 +304,7 @@ private fun SpeedTesterApp(context: Context) {
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(when {
+                                activeTab == 10 -> "Network Quality"
                                 activeTab == 8 -> "Test result"
                                 activeTab == 7 -> "Network Info"
                                 activeTab == 6 -> "Test Servers"
@@ -325,10 +332,24 @@ private fun SpeedTesterApp(context: Context) {
                         selected = activeTab == 0,
                         onClick = { activeTab = 0; showUpdateDetails = false },
                         icon = { Icon(Icons.Default.NetworkCheck, null) },
-                        label = { Text("Home") },
+                        label = { Text("Speed") },
                     )
                     NavigationBarItem(
-                        selected = activeTab != 0,
+                        selected = activeTab == 10,
+                        onClick = { activeTab = 10; showUpdateDetails = false },
+                        icon = { Icon(Icons.Default.NetworkCheck, contentDescription = "Network Quality") },
+                        label = { Text("Quality") },
+                        alwaysShowLabel = true,
+                    )
+                    NavigationBarItem(
+                        selected = activeTab == 5,
+                        onClick = { activeTab = 5; showUpdateDetails = false },
+                        icon = { Icon(Icons.Default.Wifi, contentDescription = "Wi-Fi Analyser") },
+                        label = { Text("Wi-Fi") },
+                        alwaysShowLabel = true,
+                    )
+                    NavigationBarItem(
+                        selected = activeTab != 0 && activeTab != 10 && activeTab != 5,
                         onClick = { activeTab = 3; showUpdateDetails = false },
                         icon = { dev.n2k02.updater.N2K02UpdateBadgedIcon(updateStatus) { Icon(Icons.Default.Settings, "Settings") } },
                         label = { Text("Settings") },
@@ -350,6 +371,10 @@ private fun SpeedTesterApp(context: Context) {
             }, containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
             when (activeTab) {
+                10 -> NetworkQualityPage(
+                    context = context,
+                    modifier = Modifier.fillMaxSize().padding(padding)
+                )
                 5 -> WifiAnalyzerScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 9 -> SpeedTesterPermissionsScreen(context, modifier = Modifier.fillMaxSize().padding(padding))
                 0 -> LazyColumn(
@@ -631,7 +656,9 @@ private fun SpeedTesterApp(context: Context) {
                         }
                     }
                 }
-                1 -> SpeedTestHistoryScreen(
+                1 -> SpeedTestHistoryTabbedScreen(
+                    context = context,
+                    initialPage = historyInitialTab,
                     history = history,
                     modifier = Modifier.fillMaxSize().padding(padding),
                     export = {
@@ -818,7 +845,7 @@ private fun SpeedTesterApp(context: Context) {
                             headlineContent = { Text("Test history") },
                             supportingContent = { Text("Previous speed tests and CSV export") },
                             leadingContent = { Icon(Icons.Default.History, null) },
-                            modifier = Modifier.clickable { activeTab = 1 },
+                            modifier = Modifier.clickable { historyInitialTab = 0; activeTab = 1 },
                         )
                         androidx.compose.material3.ListItem(
                             headlineContent = { Text("Server map") },
@@ -832,12 +859,6 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 activeTab = 2
                             },
-                        )
-                        ListItem(
-                            headlineContent = { Text("Wi-Fi Analyser") },
-                            supportingContent = { Text("Nearby networks, live graphs and channel recommendations") },
-                            leadingContent = { Icon(Icons.Default.Wifi, null) },
-                            modifier = Modifier.clickable { activeTab = 5; showUpdateDetails = false },
                         )
                         HorizontalDivider()
                         

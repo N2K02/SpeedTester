@@ -1,6 +1,6 @@
 # SpeedTester
 
-A lightweight Android network diagnostics toolkit (minSdk 29) built with Kotlin and Jetpack Compose.
+A lightweight Android network diagnostics toolkit (minSdk 26) built with Kotlin and Jetpack Compose.
 
 ## Features
 - Download/upload throughput tests with separate live download and upload chart series
@@ -10,6 +10,10 @@ A lightweight Android network diagnostics toolkit (minSdk 29) built with Kotlin 
 - Local history with shareable individual results, expanded CSV export, and configurable custom LibreSpeed-compatible endpoint
 - Live connection diagnostics, server host/protocol details, and Wi-Fi signal quality information
 - GitHub Releases update check and APK download/install handoff
+- Dedicated Network Quality page with a bounded, manual-only TCP/HTTPS responsiveness test, estimated score, network-path indicators, service website endpoint checks, findings, and capped local history
+- Quick, Standard, and Detailed diagnostic profiles with timeouts and low-data HEAD requests
+- Network Quality CPU time, elapsed duration, and approximate app-level network traffic readings; no periodic monitoring
+- Network Quality service endpoint reachability does not guarantee gaming, streaming, or messaging quality, and TCP failures are not packet loss
 - Manual tests only; no continuous background polling
 
 ## Build
