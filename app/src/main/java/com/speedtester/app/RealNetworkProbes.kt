@@ -173,6 +173,7 @@ object RealNetworkProbes {
         }
         val completed = CompletableDeferred<Unit>()
         val pending = ConcurrentHashMap<String, Long>()
+        val batchSent = java.util.concurrent.atomic.AtomicBoolean(false)
         val delays = java.util.Collections.synchronizedList(mutableListOf<Long>())
         val sent = 5
         var delivered = 0
@@ -186,7 +187,7 @@ object RealNetworkProbes {
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     val obj = runCatching { JSONObject(text) }.getOrNull() ?: return
                     when (obj.optString("type")) {
-                        "ready" -> if (obj.optInt("receivers", 0) > 0 && pending.isEmpty()) {
+                        "ready" -> if (obj.optInt("receivers", 0) > 0 && batchSent.compareAndSet(false, true)) {
                             repeat(sent) {
                                 val id = UUID.randomUUID().toString()
                                 pending[id] = SystemClock.elapsedRealtimeNanos()
