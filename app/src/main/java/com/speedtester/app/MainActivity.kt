@@ -338,7 +338,7 @@ private fun SpeedTesterApp(context: Context) {
                         selected = activeTab == 10,
                         onClick = { activeTab = 10; showUpdateDetails = false },
                         icon = { Icon(Icons.Default.NetworkCheck, contentDescription = "Network Quality") },
-                        label = { Text("Network") },
+                        label = { Text("Quality") },
                         alwaysShowLabel = true,
                     )
                     NavigationBarItem(
