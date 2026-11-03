@@ -18,7 +18,7 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(main.contains("activeTab == 10 -> \"Network Quality\""))
         assertTrue(main.contains("BackHandler(enabled = activeTab == 10)"))
         assertTrue(main.contains("selected = activeTab == 10"))
-        assertTrue(main.contains("label = { Text(\"Network\") }"))
+        assertTrue(main.contains("label = { Text(\"Quality\") }"))
         assertTrue(main.contains("label = { Text(\"Speed\") }"))
         assertFalse(main.contains("label = { Text(\"Home\") }"))
         assertTrue(main.contains("onClick = { activeTab = 10; showUpdateDetails = false }"))
