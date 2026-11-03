@@ -147,14 +147,21 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
             liveRealResults = emptyList()
             job = scope.launch {
                 try {
-                    val newReport = NetworkQualityRunner.run(
+                    val newReport = withContext(Dispatchers.IO) {
+                        NetworkQualityRunner.run(
                         context, profile,
                         onProgress = { name, done, total ->
-                            stage = "$name · $done/$total"
-                            progress = done.toFloat() / total.coerceAtLeast(1)
+                            withContext(Dispatchers.Main.immediate) {
+                                stage = "$name · $done/$total"
+                                progress = done.toFloat() / total.coerceAtLeast(1)
+                            }
                         },
-                        onInternetCheck = { observed -> internetResponded = observed },
-                        onRealResult = { measured -> liveRealResults = liveRealResults + measured },
+                        onInternetCheck = { observed ->
+                            withContext(Dispatchers.Main.immediate) { internetResponded = observed }
+                        },
+                        onRealResult = { measured ->
+                            withContext(Dispatchers.Main.immediate) { liveRealResults = liveRealResults + measured }
+                        },
                         realConfig = RealProbeConfig(
                             enabled = realEnabled,
                             videoUrl = videoUrl.trim(),
@@ -164,7 +171,8 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                             messageRoom = messageRoom.trim()
                         ),
                         videoPreview = if (realEnabled) videoPreview else null
-                    )
+                        )
+                    }
                     report = newReport
                     access = newReport.access
                     withContext(Dispatchers.IO) { NetworkQualityHistory.save(context, newReport) }
