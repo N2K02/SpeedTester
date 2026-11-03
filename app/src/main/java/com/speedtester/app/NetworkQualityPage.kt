@@ -452,7 +452,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
             item {
                 Text(
                     "Website checks test HTTPS reachability, not video playback, gameplay or message delivery. " +
-                        "TCP connection failures are not ICMP/UDP packet loss. Gateway and ISP hops are not probed. " +
+                        "TCP connection failures are not ICMP/UDP packet loss. Optional real checks probe gateway ICMP and only TTL-limited early route hops; they do not map the full ISP path. " +
                         "App traffic includes other SpeedTester activity during the test.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
