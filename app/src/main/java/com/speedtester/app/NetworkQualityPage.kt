@@ -88,7 +88,10 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     }
     var internetResponded by remember { mutableStateOf<Boolean?>(null) }
     var liveRealResults by remember { mutableStateOf<List<RealProbeResult>>(emptyList()) }
-    var access by remember { mutableStateOf(NetworkQualityRunner.access(context)) }
+    var access by remember { mutableStateOf(QualityAccess("Checking…", null, null, null, false)) }
+    LaunchedEffect(context) {
+        access = runCatching { NetworkQualityRunner.readAccess(context) }.getOrDefault(access)
+    }
     var running by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var stage by remember { mutableStateOf("Ready") }
@@ -106,7 +109,7 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
                     report = null
                     internetResponded = null
                     liveRealResults = emptyList()
-                    access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
+                    access = runCatching { NetworkQualityRunner.readAccess(context) }.getOrDefault(access)
                     failure = "Network changed. Run a new test."
                 }
             }
@@ -142,7 +145,6 @@ fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
             report = null  // A different network may now be selected; never show a previous quality grade.
             internetResponded = null
             liveRealResults = emptyList()
-            access = runCatching { NetworkQualityRunner.access(context) }.getOrDefault(access)
             job = scope.launch {
                 try {
                     val newReport = NetworkQualityRunner.run(
