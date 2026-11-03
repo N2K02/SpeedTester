@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
@@ -43,10 +44,9 @@ object NetworkQualityRunner {
     class NetworkChanged : Exception("Active network changed. Run the test again.")
 
     @Suppress("DEPRECATION")
-    fun access(context: Context): QualityAccess {
+    private fun access(context: Context, network: Network?): QualityAccess {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = cm.activeNetwork
-        val caps = cm.getNetworkCapabilities(network)
+        val caps = network?.let(cm::getNetworkCapabilities)
         val wifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         val cell = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
         val type = when {
@@ -62,9 +62,17 @@ object NetworkQualityRunner {
             else null
         val signal = details?.rssi?.takeIf { it in -110..-1 }
         val frequency = details?.frequency?.takeIf { it > 0 }
-        val gateway = cm.getLinkProperties(network)?.routes?.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress
+        val gateway = network?.let { cm.getLinkProperties(it)?.routes?.firstOrNull { route -> route.isDefaultRoute }?.gateway?.hostAddress }
         return QualityAccess(type, signal, frequency, gateway,
             caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
+    }
+
+    /** System network and Wi-Fi snapshots can perform blocking platform work; never call on UI. */
+    suspend fun readAccess(context: Context): QualityAccess = withContext(Dispatchers.IO) {
+        val app = context.applicationContext
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork
+        access(app, network)
     }
 
     suspend fun run(
@@ -78,8 +86,10 @@ object NetworkQualityRunner {
     ): QualityReport {
         val app = context.applicationContext
         val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = cm.activeNetwork
-        val snapshot = access(app)
+        val (network, snapshot) = withContext(Dispatchers.IO) {
+            val selected = cm.activeNetwork
+            selected to access(app, selected)
+        }
         val started = System.currentTimeMillis()
         val wallStart = SystemClock.elapsedRealtime()
         val cpuStart = Process.getElapsedCpuTime()
@@ -110,8 +120,9 @@ object NetworkQualityRunner {
             (if (realConfig.enabled) 5 else 0)
         var completed = 0
 
-        fun checkNetwork() {
-            if (changed.get() || cm.activeNetwork != network) throw NetworkChanged()
+        suspend fun checkNetwork() {
+            val active = withContext(Dispatchers.IO) { cm.activeNetwork }
+            if (changed.get() || active != network) throw NetworkChanged()
         }
 
         val tcpSamples = ArrayList<Long?>(profile.tcpSamples)
@@ -279,16 +290,13 @@ object NetworkQualityRunner {
         }
     }
 
-    /** Cancellation closes the live socket immediately rather than waiting for the connect timeout. */
+    /** Socket creation and connect are both off-main; cancellation closes the live socket. */
     private suspend fun connect(network: Network): Long? = suspendCancellableCoroutine { continuation ->
-        val socket = try {
-            network.socketFactory.createSocket()
-        } catch (_: Exception) {
-            continuation.resume(null)
-            return@suspendCancellableCoroutine
-        }
+        val socketRef = java.util.concurrent.atomic.AtomicReference<java.net.Socket?>(null)
         val worker = CoroutineScope(Dispatchers.IO).launch {
             val value = try {
+                val socket = network.socketFactory.createSocket()
+                socketRef.set(socket)
                 socket.use {
                     val start = SystemClock.elapsedRealtimeNanos()
                     it.connect(InetSocketAddress("1.1.1.1", 443), 1200)
@@ -298,7 +306,7 @@ object NetworkQualityRunner {
             continuation.resume(value)
         }
         continuation.invokeOnCancellation {
-            runCatching { socket.close() }
+            runCatching { socketRef.getAndSet(null)?.close() }
             worker.cancel()
         }
     }
