@@ -69,7 +69,7 @@ object NetworkQualityPathLogic {
                 if (displayedGatewayState == QualityPathState.SUCCESS) "ICMP reply"
                 else if (displayedGatewayState == QualityPathState.TESTING) "Testing"
                 else if (access.gateway != null) "Not verified" else "Unknown", displayedGatewayState),
-            QualityPathNode("isp", "ISP",
+            QualityPathNode("isp", "Early route",
                 if (ispState == QualityPathState.SUCCESS) "TTL reply"
                 else if (ispState == QualityPathState.TESTING) "Testing" else "Not verified", ispState),
             QualityPathNode("internet", "Internet", internetDetail, internetState)
