@@ -32,6 +32,17 @@ class NetworkQualityIntegrationContractTest {
         assertTrue(page.contains("N2K02Theme").not()) // central theme owns page styling
     }
 
+    @Test fun networkSnapshotAndSocketCreationNeverRunOnComposeMainThread() {
+        val page = source("NetworkQualityPage.kt")
+        val runner = source("NetworkQualityRunner.kt")
+        assertFalse(page.contains("NetworkQualityRunner.access(context)"))
+        assertTrue(page.contains("NetworkQualityRunner.readAccess(context)"))
+        assertTrue(runner.contains("suspend fun readAccess(context: Context): QualityAccess = withContext(Dispatchers.IO)"))
+        assertTrue(runner.contains("val worker = CoroutineScope(Dispatchers.IO).launch"))
+        assertTrue(runner.contains("val socket = network.socketFactory.createSocket()"))
+        assertTrue(runner.contains("suspend fun checkNetwork()"))
+    }
+
     @Test fun probesHaveHardTimeoutsAndCancelWithPage() {
         val runner = source("NetworkQualityRunner.kt")
         val page = source("NetworkQualityPage.kt")
