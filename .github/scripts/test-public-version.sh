@@ -9,7 +9,7 @@ trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/gh" <<'FAKE_GH'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$*" == 'api --paginate repos/N2K02/n2k02.github.io/git/matching-refs/tags/speedtester-v --jq .[].ref' ]] || exit 4
+[[ "$*" == 'api --paginate repos/N2K02/SpeedTester/git/matching-refs/tags/v --jq .[].ref' ]] || exit 4
 [[ "${SIMULATE_API_FAILURE:-0}" != "1" ]] || exit 5
 cat "$PUBLIC_REFS_FIXTURE"
 FAKE_GH
@@ -19,20 +19,20 @@ chmod +x "$tmp/gh"
 # search silently missed VRec v4.5. Check all matching refs, not the first page.
 for major in $(seq 1 14); do
   for minor in $(seq 0 9); do
-    printf 'refs/tags/speedtester-v%s.%s\n' "$major" "$minor"
+    printf 'refs/tags/v%s.%s\n' "$major" "$minor"
   done
 done > "$tmp/many-refs"
 printf '%s\n' \
-  'refs/tags/speedtester-v15.0-build-240' \
-  'refs/tags/speedtester-v15.0' \
-  'refs/tags/speedtester-v999.99' \
+  'refs/tags/v15.0-build-240' \
+  'refs/tags/v15.0' \
+  'refs/tags/v999.99' \
   'refs/tags/pcl-v99.9' \
   'refs/tags/speedtester-experimental-pr-41-run-1000' >> "$tmp/many-refs"
 
 result=$(PATH="$tmp:$PATH" PUBLIC_REFS_FIXTURE="$tmp/many-refs" bash "$resolver" speedtester)
 [[ "$result" == "v15.0" ]] || { echo "Wrong highest published version: $result"; exit 1; }
 
-printf '%s\n' 'refs/tags/speedtester-v4.5' 'refs/tags/speedtester-v4.2' > "$tmp/current-refs"
+printf '%s\n' 'refs/tags/v4.5' 'refs/tags/v4.2' > "$tmp/current-refs"
 result=$(PATH="$tmp:$PATH" PUBLIC_REFS_FIXTURE="$tmp/current-refs" bash "$resolver" speedtester)
 [[ "$result" == "v4.5" ]] || { echo "Expected v4.5, got $result"; exit 1; }
 
