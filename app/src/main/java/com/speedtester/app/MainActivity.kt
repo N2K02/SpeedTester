@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Bolt
@@ -331,13 +332,13 @@ private fun SpeedTesterApp(context: Context) {
                     NavigationBarItem(
                         selected = activeTab == 0,
                         onClick = { activeTab = 0; showUpdateDetails = false },
-                        icon = { Icon(Icons.Default.NetworkCheck, null) },
+                        icon = { Icon(Icons.Default.Speed, contentDescription = "Speed test") },
                         label = { Text("Speed") },
                     )
                     NavigationBarItem(
                         selected = activeTab == 10,
                         onClick = { activeTab = 10; showUpdateDetails = false },
-                        icon = { Icon(Icons.Default.NetworkCheck, contentDescription = "Network Quality") },
+                        icon = { Icon(Icons.Default.Timeline, contentDescription = "Network Quality") },
                         label = { Text("Quality") },
                         alwaysShowLabel = true,
                     )
