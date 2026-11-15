@@ -113,6 +113,16 @@ jobs:
           } > release-notes.md
           cat release-notes.md
 
+
+      - name: Resolve standardized experimental release name
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/experimental_naming.py --self-test
+          python3 .github/scripts/experimental_naming.py "$GITHUB_REPOSITORY" "$APP" "$GITHUB_RUN_NUMBER" "$PR_NUMBER"
       - name: Compile and test
         run: gradle --no-daemon testDebugUnitTest assembleDebug assembleRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
@@ -138,15 +148,15 @@ jobs:
             --ks "$K/old.keystore" --ks-pass env:OP --ks-key-alias androiddebugkey --key-pass env:OP \
             --next-signer --ks "$K/release.p12" --ks-pass env:RP --ks-key-alias release --key-pass env:RP \
             --lineage "$K/lineage" --rotation-min-sdk-version 28 \
-            --out "$APP-$VERSION.apk" $APK_INPUT
+            --out "${APK_NAME:-$APP-$VERSION}.apk" $APK_INPUT
           rm -rf "$K"
-          "$BT/apksigner" verify --verbose --print-certs "$APP-$VERSION.apk" | grep -E "Signer.*(DN|SHA-256 digest)"
+          "$BT/apksigner" verify --verbose --print-certs "${APK_NAME:-$APP-$VERSION}.apk" | grep -E "Signer.*(DN|SHA-256 digest)"
 
       - name: Upload APK (workflow artifact)
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.APP }}-${{ env.VERSION }}
-          path: ${{ env.APP }}-${{ env.VERSION }}.apk
+          path: ${{ env.APK_NAME || format('{0}-{1}', env.APP, env.VERSION) }}.apk
 
       - name: Publish APK as a release
         if: github.event_name != 'pull_request'
@@ -169,17 +179,17 @@ jobs:
           set -euo pipefail
           TAG="experimental-pr-$PR_NUMBER-run-$GITHUB_RUN_NUMBER"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APP-$VERSION.apk" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" "${APK_NAME:-$APP-$VERSION}.apk" --repo "$GITHUB_REPOSITORY" --clobber
           else
             for attempt in 1 2 3; do
-              if gh release create "$TAG" "$APP-$VERSION.apk" \
+              if gh release create "$TAG" "${APK_NAME:-$APP-$VERSION}.apk" \
                 --repo "$GITHUB_REPOSITORY" --target "$PR_HEAD_SHA" \
-                --title "$APP experimental · PR #$PR_NUMBER · build $GITHUB_RUN_NUMBER" \
+                --title "$EXPERIMENTAL_TITLE" \
                 --notes-file release-notes.md --prerelease --latest=false; then
                 exit 0
               fi
               if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                gh release upload "$TAG" "$APP-$VERSION.apk" --repo "$GITHUB_REPOSITORY" --clobber
+                gh release upload "$TAG" "${APK_NAME:-$APP-$VERSION}.apk" --repo "$GITHUB_REPOSITORY" --clobber
                 exit 0
               fi
               echo "::warning::GitHub Releases request failed (attempt $attempt/3); retrying"
