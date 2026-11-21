@@ -236,6 +236,7 @@ private fun SpeedTesterApp(context: Context) {
     var loggedPhase by remember { mutableStateOf("") }
     var gaugeUpload by remember { mutableStateOf(false) }
     var gaugeRunId by remember { mutableIntStateOf(0) }
+    var gaugeLiveMbps by remember { mutableFloatStateOf(0f) }
     var liveDownloadMbps by remember { mutableFloatStateOf(0f) }
     var liveUploadMbps by remember { mutableFloatStateOf(0f) }
     // Completed phase rate remains visible while the other direction is measured.
@@ -450,7 +451,10 @@ private fun SpeedTesterApp(context: Context) {
                                     if (gaugeUpload) liveUploadMbps else liveDownloadMbps
                                 } else if (gaugeUpload) (history.firstOrNull()?.upload ?: upload).toFloat()
                                 else (history.firstOrNull()?.download ?: download).toFloat()
-                                SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)
+                                SpeedometerDial(
+                                    gaugeSpeed, gaugeUpload, gaugeRunId,
+                                    needleSpeedMbps = if (testing) gaugeLiveMbps else gaugeSpeed
+                                )
                                 val lastFinished = history.firstOrNull()
                                 SpeedRateCards(
                                     download = SpeedRatePresentation.shown(
@@ -487,6 +491,7 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 Button(onClick = {
                                     if (!testing) {
+                                        gaugeLiveMbps = 0f
                                         gaugeRunId++; gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; downloadPhaseMbps = null; uploadPhaseMbps = null; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                                             logDiagnostic("========== SPEED TEST START ==========")
                                         logDiagnostic("Server directory: Speedtest.net public API · country MU")
@@ -534,9 +539,15 @@ private fun SpeedTesterApp(context: Context) {
                                                 }, { phase, value, mbps ->
                                                     status = phase; progress = value
                                                     if (phase.contains("Upload", true)) {
+                                                        gaugeLiveMbps = SpeedometerScale.smoothSample(
+                                                            if (gaugeUpload) gaugeLiveMbps else 0f, mbps
+                                                        )
                                                         gaugeUpload = true
                                                         liveUploadMbps = mbps.coerceAtLeast(0f)
                                                     } else if (phase.contains("Download", true)) {
+                                                        gaugeLiveMbps = SpeedometerScale.smoothSample(
+                                                            if (gaugeUpload) 0f else gaugeLiveMbps, mbps
+                                                        )
                                                         gaugeUpload = false
                                                         liveDownloadMbps = mbps.coerceAtLeast(0f)
                                                     }
@@ -563,6 +574,7 @@ private fun SpeedTesterApp(context: Context) {
                                                      downloadAverage = 0.0; downloadPeak = 0.0
                                                      uploadAverage = 0.0; uploadPeak = 0.0
                                                      liveDownloadMbps = 0f; liveUploadMbps = 0f
+                                                     gaugeLiveMbps = 0f
                                                      logDiagnostic("SERVER_FAILOVER " + original.serverId + " -> " + alternate.serverId)
                                                      candidate = alternate
                                                      selectedServer = alternate
