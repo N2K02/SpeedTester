@@ -1,9 +1,9 @@
 package com.speedtester.app
 
 import android.graphics.Paint
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +38,8 @@ import kotlin.math.sin
 private val dialCyan = Color(0xFF26E3EE)
 private val dialBlue = Color(0xFF138CF7)
 private val dialPurple = Color(0xFFA580FF)
+// Live targets arrive about every 250 ms. A linear sweep keeps moving between updates.
+private val needleAnimation = tween<Float>(durationMillis = 320, easing = LinearEasing)
 
 @Composable
 internal fun SpeedometerDial(
@@ -55,7 +57,7 @@ internal fun SpeedometerDial(
     }
     val animatedAngle = animateFloatAsState(
         targetValue = SpeedometerScale.angleFor(needleSpeedMbps, scale),
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
+        animationSpec = needleAnimation,
         label = "Speedometer needle angle"
     )
     val tint = if (isUpload) dialPurple else dialCyan

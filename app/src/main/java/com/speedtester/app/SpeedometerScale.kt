@@ -2,7 +2,7 @@ package com.speedtester.app
 
 import kotlin.math.ceil
 
-/** Pure speedometer math for smoothing, animation targets and scale. */
+/** Pure speedometer math for animation targets and scale. */
 internal object SpeedometerScale {
     const val START_DEGREES = 150f
     const val SWEEP_DEGREES = 240f
@@ -12,10 +12,6 @@ internal object SpeedometerScale {
     val dialFractions: List<Float> = listOf(0f, 0.08f, 0.17f, 0.32f, 0.47f, 0.62f, 0.75f, 0.88f, 1f)
 
     fun sanitize(speed: Float): Float = if (speed.isFinite()) speed.coerceAtLeast(0f) else 0f
-
-    // Give the latest sample and the previous display value equal weight.
-    fun smoothSample(previous: Float, sample: Float): Float =
-        sanitize(previous) * 0.5f + sanitize(sample) * 0.5f
 
     fun scaleFor(speed: Float, previous: Float = 1000f): Float {
         val valid = sanitize(speed)
