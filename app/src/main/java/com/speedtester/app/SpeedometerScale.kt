@@ -2,7 +2,7 @@ package com.speedtester.app
 
 import kotlin.math.ceil
 
-/** Pure speedometer math so animation targets and scale can be regression-tested. */
+/** Pure speedometer math for animation targets and scale. */
 internal object SpeedometerScale {
     const val START_DEGREES = 150f
     const val SWEEP_DEGREES = 240f
