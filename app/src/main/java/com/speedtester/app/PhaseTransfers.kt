@@ -27,6 +27,13 @@ internal class PhaseTransfers {
             stopped = true
             active.toList().also { active.clear() }
         }
-        cancellations.forEach { it() }
+        // A misbehaving cancellation callback must not prevent other sockets/calls from closing.
+        cancellations.forEach { cancel ->
+            try {
+                cancel()
+            } catch (_: Exception) {
+                // Cancellation is best-effort; continue cancelling the other requests.
+            }
+        }
     }
 }
