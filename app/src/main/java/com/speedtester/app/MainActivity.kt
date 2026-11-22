@@ -451,13 +451,13 @@ private fun SpeedTesterApp(context: Context) {
                                 verticalArrangement = Arrangement.spacedBy(7.dp)) {
                                 Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.labelMedium)
+                                // Only live transfers move the gauge; completed speeds remain in the result cards.
                                 val gaugeSpeed = if (testing) {
                                     if (gaugeUpload) liveUploadMbps else liveDownloadMbps
-                                } else if (gaugeUpload) (history.firstOrNull()?.upload ?: upload).toFloat()
-                                else (history.firstOrNull()?.download ?: download).toFloat()
+                                } else 0f
                                 SpeedometerDial(
                                     gaugeSpeed, gaugeUpload,
-                                    needleSpeedMbps = if (testing) gaugeLiveMbps else gaugeSpeed
+                                    needleSpeedMbps = if (testing) gaugeLiveMbps else 0f
                                 )
                                 if (testing && gaugeUpload) {
                                     Text(
