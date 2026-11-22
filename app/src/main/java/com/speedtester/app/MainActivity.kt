@@ -1510,6 +1510,12 @@ private object SpeedEngine {
             val total = TransferAccounting.countableBytes(sent.get(), acknowledged.get(), verifyUpload)
             onLog("$label gauge: longest sample gap ${TimeUnit.NANOSECONDS.toMillis(longestSampleNanos)} ms, " +
                 "$unacknowledgedIntervals intervals with upload traffic awaiting acknowledgment")
+            if (longestSampleNanos > TimeUnit.MILLISECONDS.toNanos(750)) {
+                onLog("$label warning: speed samples delayed; the gauge may briefly lag on a busy device")
+            }
+            if (verifyUpload && unacknowledgedIntervals >= 3) {
+                onLog("$label note: outgoing traffic is waiting for server confirmation; live needle is an estimate")
+            }
             if (total <= 0L) error(label + ": no server-accepted data; " +
                 (failures.get()?.javaClass?.simpleName ?: "no successful transfer"))
             val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
@@ -1520,6 +1526,7 @@ private object SpeedEngine {
                 else average
             val samples = synchronized(latency) { latency.toList() }
             onLog(label + " concurrent loaded latency probes: " + samples.size + "/" + probeAttempts.get())
+            if (samples.isEmpty()) onLog("$label warning: loaded latency unavailable; no successful TCP probes")
             Phase(steady, average, maxOf(peak, steady), total, seconds,
                 samples, probeFailures.get(), probeAttempts.get())
         } finally {
