@@ -1477,9 +1477,7 @@ private object SpeedEngine {
             var lastMovedBytes = 0L
             var unacknowledgedIntervals = 0
             var longestSampleNanos = 0L
-            var peak = 0.0
-            var warmupBytes = -1L
-            var warmupAt = 0L
+            val throughput = ThroughputSamples(start, TimeUnit.MILLISECONDS.toNanos(WARMUP_MS))
             while (System.nanoTime() - start < duration) {
                 kotlinx.coroutines.delay(250)
                 val now = System.nanoTime()
@@ -1490,11 +1488,7 @@ private object SpeedEngine {
                 val needleMbps = gaugeRate.sample(now, movedBytes)
                 if (verifyUpload && total == lastBytes && movedBytes > lastMovedBytes) unacknowledgedIntervals++
                 longestSampleNanos = maxOf(longestSampleNanos, now - lastAt)
-                if (warmupBytes < 0 && now - start >= TimeUnit.MILLISECONDS.toNanos(WARMUP_MS)) {
-                    warmupBytes = total
-                    warmupAt = now
-                }
-                peak = maxOf(peak, instant)
+                throughput.record(now, total)
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
                 onUpdate(label, from + (to - from) * fraction, instant.toFloat(), needleMbps)
                 lastAt = now
@@ -1518,16 +1512,14 @@ private object SpeedEngine {
             }
             if (total <= 0L) error(label + ": no server-accepted data; " +
                 (failures.get()?.javaClass?.simpleName ?: "no successful transfer"))
+            throughput.record(end, total)
             val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
-            val average = total * 8.0 / seconds / 1_000_000.0
-            val steady = if (warmupBytes >= 0L && end > warmupAt)
-                (total - warmupBytes).coerceAtLeast(0L) * 8.0 /
-                    ((end - warmupAt) / 1_000_000_000.0) / 1_000_000.0
-                else average
+            val average = throughput.averageMbps()
+            val steady = throughput.steadyMbps()
             val samples = synchronized(latency) { latency.toList() }
             onLog(label + " concurrent loaded latency probes: " + samples.size + "/" + probeAttempts.get())
             if (samples.isEmpty()) onLog("$label warning: loaded latency unavailable; no successful TCP probes")
-            Phase(steady, average, maxOf(peak, steady), total, seconds,
+            Phase(steady, average, throughput.peakMbps(), total, seconds,
                 samples, probeFailures.get(), probeAttempts.get())
         } finally {
             transfers.stop()
@@ -1615,20 +1607,22 @@ private object SpeedEngine {
         onLog("DOWNLOAD: bytes=${down.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, down.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, down.averageMbps) + " Mbps")
 
         publishProgress("Uploading · Ookla server", .55f, 0f, null)
-        val payload = ByteArray(256 * 1024).also { java.security.SecureRandom().nextBytes(it) }
+        val payload = ByteArray(UploadRequestSizing.MAX_BYTES).also { java.security.SecureRandom().nextBytes(it) }
+        val uploadStarted = System.nanoTime()
         val up = runPhase("Uploading · Ookla server", .55f, .95f, probeAddress, true, publishProgress, onLog) { transfers, counter, accepted ->
+            val requestSize = UploadRequestSizing.choose(accepted.get(), System.nanoTime() - uploadStarted)
             val nonce = java.util.UUID.randomUUID().toString()
             val requestUrl = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, uploadUri.path, "nocache=$nonce", null).toString()
-            // A 256 KiB request enables acceptance-based throughput even on slower connections.
+            // Adapt payload size to confirmed throughput without counting failed/cancelled requests.
             val body = object : okhttp3.RequestBody() {
                 override fun contentType() = "application/octet-stream".toMediaType()
-                override fun contentLength() = payload.size.toLong()
+                override fun contentLength() = requestSize.toLong()
                 override fun writeTo(sink: okio.BufferedSink) {
                     var offset = 0
-                    while (offset < payload.size) {
+                    while (offset < requestSize) {
                         if (transfers.stopped) throw java.io.IOException("Test time is up")
                         // Complete Okio segments are emitted by write without flushing each chunk.
-                        val n = minOf(16 * 1024, payload.size - offset)
+                        val n = minOf(16 * 1024, requestSize - offset)
                         sink.write(payload, offset, n)
                         counter.addAndGet(n.toLong())
                         offset += n
@@ -1639,7 +1633,7 @@ private object SpeedEngine {
             transfers.run(cancel = call::cancel) {
                 call.execute().use {
                     if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code)
-                    accepted.addAndGet(payload.size.toLong())
+                    if (!transfers.stopped) accepted.addAndGet(requestSize.toLong())
                 }
             }
         }
