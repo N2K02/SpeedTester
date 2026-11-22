@@ -75,6 +75,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -1355,8 +1356,11 @@ private object SpeedEngine {
         }
         // Latency to every server, measured in parallel too.
         val measured = kotlinx.coroutines.coroutineScope {
+            // Bound concurrent TCP probes to avoid socket bursts on older phones and mobile networks.
+            val probeSlots = kotlinx.coroutines.sync.Semaphore(8)
             found.values.map { candidate ->
                 async {
+                    probeSlots.withPermit {
                     val hostPort = candidate.host
                     val host = hostPort.substringBeforeLast(":", hostPort)
                     val port = hostPort.substringAfterLast(":", "").toIntOrNull() ?: 443
@@ -1366,6 +1370,7 @@ private object SpeedEngine {
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                     }.getOrNull()
                     candidate.copy(latencyMs = latency)
+                    }
                 }
             }.awaitAll()
         }
