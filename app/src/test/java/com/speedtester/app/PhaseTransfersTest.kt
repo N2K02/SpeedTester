@@ -40,6 +40,35 @@ class PhaseTransfersTest {
         }
     }
 
+    @Test fun throwingCancellationDoesNotSkipOtherActiveTransfers() {
+        val phase = PhaseTransfers()
+        val cancelled = AtomicInteger()
+        val ready = CountDownLatch(2)
+        val release = CountDownLatch(1)
+        val threads = (1..2).map { index ->
+            thread(isDaemon = true) {
+                phase.run(cancel = {
+                    cancelled.incrementAndGet()
+                    if (index == 1) throw IllegalStateException("Cancellation failure")
+                }) {
+                    ready.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                }
+            }
+        }
+
+        try {
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            phase.stop()
+            assertEquals(2, cancelled.get())
+            assertTrue(phase.stopped)
+        } finally {
+            release.countDown()
+            threads.forEach { it.join(5_000) }
+            phase.stop()
+        }
+    }
+
     @Test fun completedRequestsAreRemovedBeforeShutdown() {
         val phase = PhaseTransfers()
         var cancelled = false
