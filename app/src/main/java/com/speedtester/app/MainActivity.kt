@@ -459,6 +459,13 @@ private fun SpeedTesterApp(context: Context) {
                                     gaugeSpeed, gaugeUpload,
                                     needleSpeedMbps = if (testing) gaugeLiveMbps else gaugeSpeed
                                 )
+                                if (testing && gaugeUpload) {
+                                    Text(
+                                        "Needle: outgoing transfer estimate · Live rate: server-confirmed uploads",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 val lastFinished = history.firstOrNull()
                                 SpeedRateCards(
                                     download = SpeedRatePresentation.shown(
@@ -504,20 +511,20 @@ private fun SpeedTesterApp(context: Context) {
                                         val chosenServerAtStart = selectedServerLive
                                         val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
                                         val networkAtStart = connectivity.activeNetwork
-                                        val changedDuringTest = java.util.concurrent.atomic.AtomicBoolean(false)
+                                        val networkCancellation = NetworkTestCancellation()
                                         val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
                                             override fun onAvailable(network: android.net.Network) {
-                                                if (network != networkAtStart) changedDuringTest.set(true)
+                                                if (network != networkAtStart) networkCancellation.networkChanged()
                                             }
                                             override fun onLost(network: android.net.Network) {
-                                                if (network == networkAtStart) changedDuringTest.set(true)
+                                                if (network == networkAtStart) networkCancellation.networkChanged()
                                             }
                                         }
                                         val watchingNetwork = runCatching {
                                             connectivity.registerDefaultNetworkCallback(networkCallback)
                                             true
                                         }.getOrDefault(false)
-                                        scope.launch {
+                                        val testJob = scope.launch {
                                             var resultSaved = false
                                             try {
                                                 val testNetworkAtStart = withContext(Dispatchers.IO) { readNetworkInfo(context) }
@@ -555,14 +562,19 @@ private fun SpeedTesterApp(context: Context) {
                                                     if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { isUploadPhase, completedMbps ->
-                                                    if (isUploadPhase) uploadPhaseMbps = completedMbps
-                                                    else downloadPhaseMbps = completedMbps
+                                                    if (isUploadPhase) {
+                                                        gaugeUpload = true
+                                                        uploadPhaseMbps = completedMbps
+                                                    } else {
+                                                        gaugeUpload = false
+                                                        downloadPhaseMbps = completedMbps
+                                                    }
                                                     gaugeLiveMbps = completedMbps.toFloat()
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
                                                 val original = candidate ?: error("No Mauritius server available")
                                                  val result = try { measure(original) } catch (first: Exception) {
                                                      if (first is CancellationException) throw first
-                                                     if (changedDuringTest.get() || connectivity.activeNetwork != networkAtStart) throw first
+                                                     if (networkCancellation.hasChanged() || connectivity.activeNetwork != networkAtStart) throw first
                                                      logDiagnostic("SERVER_FAILURE " + original.serverId + ": " + first.javaClass.simpleName)
                                                      status = "Refreshing failed server…"
                                                      val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
@@ -590,7 +602,7 @@ private fun SpeedTesterApp(context: Context) {
                                                 loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
                                                 val connectionSnapshot = withContext(Dispatchers.IO) { readNetworkInfo(context) }
                                                 netInfo = connectionSnapshot
-                                                val networkChanged = changedDuringTest.get() ||
+                                                val networkChanged = networkCancellation.hasChanged() ||
                                                     connectivity.activeNetwork != networkAtStart ||
                                                     NetworkSnapshotPolicy.changed(
                                                         testNetworkAtStart.type, connectionSnapshot.type,
@@ -610,7 +622,15 @@ private fun SpeedTesterApp(context: Context) {
                                                 }
                                                 resultSaved = true
  logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
-                                            } catch (e: Exception) { if (e is CancellationException) throw e; if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                            } catch (e: CancellationException) {
+                                                if (networkCancellation.hasChanged()) {
+                                                    status = "Network changed — test cancelled"
+                                                    error = "Connection changed during the test. Retry on a stable network."
+                                                    gaugeLiveMbps = 0f
+                                                    logDiagnostic("NETWORK_CHANGED_DURING_TEST — transfer cancelled")
+                                                }
+                                                throw e
+                                            } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally {
                                                 if (watchingNetwork) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
                                                 if (!resultSaved) gaugeUpload = false
@@ -618,6 +638,9 @@ private fun SpeedTesterApp(context: Context) {
                                                 progress = 1f
                                             }
                                         }
+                                        networkCancellation.attach(testJob)
+                                        // Check after registration too, in case the default network changed immediately.
+                                        if (connectivity.activeNetwork != networkAtStart) networkCancellation.networkChanged()
                                     }
                                 }, enabled = !testing && selectedServerLive != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServerLive == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
