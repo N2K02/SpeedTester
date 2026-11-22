@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -127,8 +126,10 @@ internal fun SpeedometerDial(
                 val hubInnerRadius = 7.dp.toPx()
                 val hubCenterRadius = 2.dp.toPx()
 
-                val dialFace = obtainGraphicsLayer()
-                dialFace.record {
+                // Cache geometry and paints, but render directly with Canvas.
+                // This avoids relying on GraphicsLayer recording on older Android GPUs.
+                onDrawBehind {
+                    val angle = animatedAngle.value
                     drawArc(
                         color = outerTrack,
                         startAngle = SpeedometerScale.START_DEGREES,
@@ -146,11 +147,6 @@ internal fun SpeedometerDial(
                             canvas.nativeCanvas.drawText(label.text, label.position.x, label.position.y, textPaint)
                         }
                     }
-                }
-
-                onDrawBehind {
-                    val angle = animatedAngle.value
-                    drawLayer(dialFace)
                     val sweep = (angle - SpeedometerScale.START_DEGREES)
                         .coerceIn(0f, SpeedometerScale.SWEEP_DEGREES)
                     if (sweep > 0.01f) {
