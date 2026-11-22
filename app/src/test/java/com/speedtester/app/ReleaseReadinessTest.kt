@@ -62,8 +62,8 @@ class ReleaseReadinessTest {
         assertEquals("Unavailable", legacy.wifiSsid)
         assertEquals("Unavailable", legacy.wifiBssid)
         val main = source("MainActivity.kt")
-        assertTrue(main.contains("persistHistory((listOf(saved) + history).take(100))"))
-        assertTrue(main.contains("persistHistory(emptyList())"))
+        assertTrue(main.contains("persistHistory { (listOf(saved) + it).take(100) }"))
+        assertTrue(main.contains("persistHistory { emptyList() }"))
         assertTrue(main.contains("var selectedHistory by remember"))
         assertTrue(main.contains("Toast.makeText(context"))
         assertFalse(main.contains("history.remove(result)"))
@@ -73,5 +73,15 @@ class ReleaseReadinessTest {
         val workflow = listOf(File(".github/workflows/build.yml"), File("../.github/workflows/build.yml"))
             .first { it.isFile }.readText()
         assertTrue(workflow.contains("testDebugUnitTest assembleDebug assembleRelease"))
+    }
+
+    @Test fun cancelledHistoryWriteDoesNotPublish() {
+        var published = false
+        val cancelled = java.util.concurrent.CancellationException()
+        val failure = runCatching {
+            HistoryCommitPolicy.commit(emptyList(), { throw cancelled }, { published = true })
+        }.exceptionOrNull()
+        assertSame(cancelled, failure)
+        assertFalse(published)
     }
 }

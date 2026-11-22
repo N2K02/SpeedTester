@@ -87,7 +87,7 @@ class SpeedTesterDesignTest {
         assertTrue(main.contains("lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED)"))
         assertTrue(main.contains("LaunchedEffect(lifecycleOwner, activeTab)"))
         assertTrue(main.contains("if (activeTab != 0 && activeTab != 7) return@LaunchedEffect"))
-        assertTrue(main.contains("netInfo = readNetworkInfo(context)"))
+        assertTrue(main.contains("netInfo = withContext(Dispatchers.IO) { readNetworkInfo(context) }"))
         assertTrue(main.contains("kotlinx.coroutines.delay(2500)"))
         assertFalse(main.contains("LaunchedEffect(Unit) {\n        while (true) {\n            netInfo"))
     }
@@ -105,6 +105,7 @@ class SpeedTesterDesignTest {
         assertTrue(main.contains("uploadPhaseMbps"))
         assertTrue(main.contains("onPhaseFinished"))
         assertTrue(gauge.contains(".drawWithCache {"))
+        assertTrue(gauge.contains("dialFace.record {"))
         assertTrue(gauge.substringAfter("onDrawBehind {").contains("animatedAngle.value"))
         assertFalse(gauge.contains("animatedSpeed"))
         assertTrue(cards.contains("RateCard(\"Download\""))

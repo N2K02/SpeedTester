@@ -6,11 +6,11 @@ import org.junit.Test
 class SpeedometerScaleTest {
     @Test fun needleAtZeroAndFullScale() {
         assertEquals(150f, SpeedometerScale.angleFor(0f), 0.001f)
-        assertEquals(390f, SpeedometerScale.angleFor(1000f), 0.001f)
+        assertEquals(390f, SpeedometerScale.angleFor(10_000f), 0.001f)
     }
 
     @Test fun needleMovesMonotonicallyAndSmoothlyBetweenMarks() {
-        val values = listOf(0f, 1f, 5f, 7.5f, 10f, 25f, 50f, 100f, 250f, 500f, 750f, 1000f)
+        val values = listOf(0f, 1f, 5f, 7.5f, 10f, 25f, 50f, 100f, 250f, 500f, 750f, 1000f, 2500f, 10_000f)
         val angles = values.map { SpeedometerScale.angleFor(it) }
         assertTrue(angles.zipWithNext().all { (left, right) -> right > left })
         assertEquals((SpeedometerScale.angleFor(5f) + SpeedometerScale.angleFor(10f)) / 2f,
@@ -25,16 +25,16 @@ class SpeedometerScaleTest {
         assertEquals(390f, SpeedometerScale.angleFor(99999f), 0f)
     }
 
-    @Test fun scaleGrowsForFastConnectionsWithoutShrinkingDuringATest() {
-        assertEquals(1000f, SpeedometerScale.scaleFor(500f), 0f)
-        assertEquals(1500f, SpeedometerScale.scaleFor(1130f), 0f)
-        assertEquals(1500f, SpeedometerScale.scaleFor(300f, 1500f), 0f)
-        assertEquals(390f, SpeedometerScale.angleFor(1500f, 1500f), 0f)
-        assertEquals(1500f, SpeedometerScale.marks(1500f).last(), 0f)
+    @Test fun crossingOneGigabitDoesNotMoveTheNeedleBackward() {
+        val below = SpeedometerScale.angleFor(999f)
+        val above = SpeedometerScale.angleFor(1001f)
+        assertTrue(above > below)
+        assertTrue(above - below < 1f)
+        assertEquals(SpeedometerScale.marks.size, SpeedometerScale.dialFractions.size)
     }
 
     @Test fun phaseSelectionUsesItsOwnSpeed() {
         assertTrue(SpeedometerScale.angleFor(100f) > SpeedometerScale.angleFor(20f))
-        assertEquals(150f, SpeedometerScale.angleFor(0f, 2000f), 0f)
+        assertEquals(150f, SpeedometerScale.angleFor(0f), 0f)
     }
 }

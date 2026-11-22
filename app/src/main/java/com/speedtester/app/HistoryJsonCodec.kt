@@ -49,9 +49,11 @@ internal object HistoryJsonCodec {
 
 /** Publish the updated in-memory list only after a successful durable write. */
 internal object HistoryCommitPolicy {
-    fun commit(next: List<TestResult>, write: (List<TestResult>) -> Unit, publish: (List<TestResult>) -> Unit): Boolean {
+    inline fun commit(next: List<TestResult>, write: (List<TestResult>) -> Unit, publish: (List<TestResult>) -> Unit): Boolean {
         try {
             write(next)
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
         } catch (_: Exception) {
             return false
         }

@@ -9,11 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
@@ -25,6 +20,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,18 +41,12 @@ private val needleAnimation = tween<Float>(durationMillis = 320, easing = Linear
 internal fun SpeedometerDial(
     speedMbps: Float,
     isUpload: Boolean,
-    resetKey: Int,
     needleSpeedMbps: Float,
     modifier: Modifier = Modifier
 ) {
     val safeSpeed = SpeedometerScale.sanitize(speedMbps)
-    var previousScale by remember(resetKey) { mutableFloatStateOf(1000f) }
-    val scale = SpeedometerScale.scaleFor(needleSpeedMbps, previousScale)
-    if (scale != previousScale) {
-        SideEffect { previousScale = scale }
-    }
     val animatedAngle = animateFloatAsState(
-        targetValue = SpeedometerScale.angleFor(needleSpeedMbps, scale),
+        targetValue = SpeedometerScale.angleFor(needleSpeedMbps),
         animationSpec = needleAnimation,
         label = "Speedometer needle angle"
     )
@@ -107,7 +97,7 @@ internal fun SpeedometerDial(
                     textAlign = Paint.Align.CENTER
                     isFakeBoldText = true
                 }
-                val labels = SpeedometerScale.marks(scale).mapIndexed { index, mark ->
+                val labels = SpeedometerScale.marks.mapIndexed { index, mark ->
                     val degrees = SpeedometerScale.START_DEGREES +
                         SpeedometerScale.dialFractions[index] * SpeedometerScale.SWEEP_DEGREES
                     val position = dialPoint(center, radius - 48.dp.toPx(), Math.toRadians(degrees.toDouble()))
@@ -137,8 +127,8 @@ internal fun SpeedometerDial(
                 val hubInnerRadius = 7.dp.toPx()
                 val hubCenterRadius = 2.dp.toPx()
 
-                onDrawBehind {
-                    val angle = animatedAngle.value
+                val dialFace = obtainGraphicsLayer()
+                dialFace.record {
                     drawArc(
                         color = outerTrack,
                         startAngle = SpeedometerScale.START_DEGREES,
@@ -148,6 +138,19 @@ internal fun SpeedometerDial(
                         size = arcSize,
                         style = trackStroke
                     )
+                    ticks.forEach { tick ->
+                        drawLine(tick.inactiveColor, tick.start, tick.end, tick.width, cap = StrokeCap.Round)
+                    }
+                    drawIntoCanvas { canvas ->
+                        labels.forEach { label ->
+                            canvas.nativeCanvas.drawText(label.text, label.position.x, label.position.y, textPaint)
+                        }
+                    }
+                }
+
+                onDrawBehind {
+                    val angle = animatedAngle.value
+                    drawLayer(dialFace)
                     val sweep = (angle - SpeedometerScale.START_DEGREES)
                         .coerceIn(0f, SpeedometerScale.SWEEP_DEGREES)
                     if (sweep > 0.01f) {
@@ -161,19 +164,9 @@ internal fun SpeedometerDial(
                             style = progressStroke
                         )
                     }
-                    ticks.forEach { tick ->
-                        drawLine(
-                            color = if (tick.degrees <= angle) tint else tick.inactiveColor,
-                            start = tick.start,
-                            end = tick.end,
-                            strokeWidth = tick.width,
-                            cap = StrokeCap.Round
-                        )
-                    }
-                    drawIntoCanvas { canvas ->
-                        labels.forEach { label ->
-                            canvas.nativeCanvas.drawText(label.text, label.position.x, label.position.y, textPaint)
-                        }
+                    for (tick in ticks) {
+                        if (tick.degrees > angle) break
+                        drawLine(tint, tick.start, tick.end, tick.width, cap = StrokeCap.Round)
                     }
                     rotate(degrees = angle, pivot = center) {
                         drawPath(needle, needleGlow, style = needleStroke)

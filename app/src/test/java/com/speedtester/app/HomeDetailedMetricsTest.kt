@@ -35,7 +35,7 @@ class HomeDetailedMetricsTest {
         assertTrue(first >= 0 && last > first)
         val home = main.substring(first, last)
         assertTrue(home.contains("SpeedometerDial("))
-        assertTrue(home.contains("gaugeSpeed, gaugeUpload, gaugeRunId,"))
+        assertTrue(home.contains("gaugeSpeed, gaugeUpload,"))
         assertTrue(home.contains("if (phase.contains(\"Upload\", true))") ||
             main.contains("if (phase.contains(\"Upload\", true))"))
         assertTrue(home.contains("HomeDetailedMetrics("))
