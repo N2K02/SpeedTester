@@ -73,6 +73,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -205,7 +208,7 @@ private fun SpeedTesterApp(context: Context) {
     var showUpdateDetails by remember { mutableStateOf(false) }
     val updateStatus by LiveUpdater.controller.status.collectAsState()
     val activityLog = remember { mutableStateListOf("Ready. Start a test to see live diagnostics here.") }
-    var netInfo by remember { mutableStateOf(readNetworkInfo(context)) }
+    var netInfo by remember { mutableStateOf(NetworkInfo("Checking…", false, "—", "—", "—", "—", "", "Unavailable", "Unavailable")) }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Poll only on pages displaying live network information, and only while foregrounded.
     // Network Quality uses its own one-shot snapshot and must not incur idle polling.
@@ -213,7 +216,7 @@ private fun SpeedTesterApp(context: Context) {
         if (activeTab != 0 && activeTab != 7) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                netInfo = readNetworkInfo(context)
+                netInfo = withContext(Dispatchers.IO) { readNetworkInfo(context) }
                 kotlinx.coroutines.delay(2500)
             }
         }
@@ -235,7 +238,7 @@ private fun SpeedTesterApp(context: Context) {
     var dnsLookupMs by remember { mutableLongStateOf(-1L) }
     var loggedPhase by remember { mutableStateOf("") }
     var gaugeUpload by remember { mutableStateOf(false) }
-    var gaugeRunId by remember { mutableIntStateOf(0) }
+    var gaugeLiveMbps by remember { mutableFloatStateOf(0f) }
     var liveDownloadMbps by remember { mutableFloatStateOf(0f) }
     var liveUploadMbps by remember { mutableFloatStateOf(0f) }
     // Completed phase rate remains visible while the other direction is measured.
@@ -255,10 +258,12 @@ private fun SpeedTesterApp(context: Context) {
                 .toMutableStateList()
         }.getOrElse { mutableStateListOf() }
     }
-    // The UI list is only modified once the durable AtomicFile write succeeds.
-    fun persistHistory(next: List<TestResult>): Boolean {
+    val historyWrites = remember { Mutex() }
+    // Serialize edits and publish on main after the durable write completes on IO.
+    suspend fun persistHistory(update: (List<TestResult>) -> List<TestResult>): Boolean = historyWrites.withLock {
+        val next = update(history.toList())
         val ok = HistoryCommitPolicy.commit(next, { items ->
-            TestHistoryStore.write(context, HistoryJsonCodec.encode(items))
+            withContext(Dispatchers.IO) { TestHistoryStore.write(context, HistoryJsonCodec.encode(items)) }
         }, { items ->
             history.clear()
             history.addAll(items)
@@ -268,7 +273,7 @@ private fun SpeedTesterApp(context: Context) {
             logDiagnostic("HISTORY_WRITE_FAILED")
             android.widget.Toast.makeText(context, "Could not save history. Check device storage.", android.widget.Toast.LENGTH_LONG).show()
         }
-        return ok
+        ok
     }
     var selectedHistory by remember { mutableStateOf<TestResult?>(null) }
     BackHandler(enabled = activeTab == 10) { activeTab = 0 }
@@ -450,7 +455,17 @@ private fun SpeedTesterApp(context: Context) {
                                     if (gaugeUpload) liveUploadMbps else liveDownloadMbps
                                 } else if (gaugeUpload) (history.firstOrNull()?.upload ?: upload).toFloat()
                                 else (history.firstOrNull()?.download ?: download).toFloat()
-                                SpeedometerDial(gaugeSpeed, gaugeUpload, gaugeRunId)
+                                SpeedometerDial(
+                                    gaugeSpeed, gaugeUpload,
+                                    needleSpeedMbps = if (testing) gaugeLiveMbps else gaugeSpeed
+                                )
+                                if (testing && gaugeUpload) {
+                                    Text(
+                                        "Needle: outgoing transfer estimate · Live rate: server-confirmed uploads",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 val lastFinished = history.firstOrNull()
                                 SpeedRateCards(
                                     download = SpeedRatePresentation.shown(
@@ -487,30 +502,32 @@ private fun SpeedTesterApp(context: Context) {
                                 }
                                 Button(onClick = {
                                     if (!testing) {
-                                        gaugeRunId++; gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; downloadPhaseMbps = null; uploadPhaseMbps = null; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
+                                        gaugeLiveMbps = 0f
+                                        gaugeUpload = false; liveDownloadMbps = 0f; liveUploadMbps = 0f; downloadPhaseMbps = null; uploadPhaseMbps = null; testing = true; error = null; progress = 0f; loggedPhase = ""; livePing = -1L; liveJitter = 0.0; downloadAverage = 0.0; downloadPeak = 0.0; uploadAverage = 0.0; uploadPeak = 0.0; loadedPing = -1L; loadedJitter = 0.0; failedProbes = 0; probeCount = 0; downloadSamples.clear(); uploadSamples.clear(); status = "Preparing test…"; activityLog.clear(); activityLog.add("Validating Mauritius Ookla server"); activityLog.add("Preparing HTTPS throughput and latency probes"); activityLog.add("Directory: " + endpoint.trim()); while (activityLog.size > 8) activityLog.removeAt(0)
                                                             logDiagnostic("========== SPEED TEST START ==========")
                                         logDiagnostic("Server directory: Speedtest.net public API · country MU")
                                         logDiagnostic("Network: " + netInfo.type + " | internet=" + netInfo.connected + " | Wi-Fi RSSI=" + netInfo.signal + " | quality=" + netInfo.quality + " | link=" + netInfo.link + " | band=" + netInfo.frequency)
                                         logDiagnostic("Device clock: " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", java.util.Locale.getDefault()).format(java.util.Date()))
-                                        val testNetworkAtStart = readNetworkInfo(context)
                                         val chosenServerAtStart = selectedServerLive
                                         val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
                                         val networkAtStart = connectivity.activeNetwork
-                                        val changedDuringTest = java.util.concurrent.atomic.AtomicBoolean(false)
+                                        val networkCancellation = NetworkTestCancellation()
                                         val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
                                             override fun onAvailable(network: android.net.Network) {
-                                                if (network != networkAtStart) changedDuringTest.set(true)
+                                                if (network != networkAtStart) networkCancellation.networkChanged()
                                             }
                                             override fun onLost(network: android.net.Network) {
-                                                if (network == networkAtStart) changedDuringTest.set(true)
+                                                if (network == networkAtStart) networkCancellation.networkChanged()
                                             }
                                         }
                                         val watchingNetwork = runCatching {
                                             connectivity.registerDefaultNetworkCallback(networkCallback)
                                             true
                                         }.getOrDefault(false)
-                                        scope.launch {
+                                        val testJob = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                                            var resultSaved = false
                                             try {
+                                                val testNetworkAtStart = withContext(Dispatchers.IO) { readNetworkInfo(context) }
                                                 var candidate = chosenServerAtStart
                                                  if (lastRefresh == 0L || android.os.SystemClock.elapsedRealtime() - lastRefresh > 900_000L) {
                                                      val fresh = runCatching { withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() } }.getOrNull()
@@ -531,25 +548,33 @@ private fun SpeedTesterApp(context: Context) {
                                                         serverDetails = mapped
                                                         prefs.edit().putString("server_lat", mapped.latitude?.toString()).putString("server_lon", mapped.longitude?.toString()).apply()
                                                     }
-                                                }, { phase, value, mbps ->
+                                                }, { phase, value, mbps, needleMbps ->
                                                     status = phase; progress = value
                                                     if (phase.contains("Upload", true)) {
                                                         gaugeUpload = true
+                                                        gaugeLiveMbps = needleMbps ?: 0f
                                                         liveUploadMbps = mbps.coerceAtLeast(0f)
                                                     } else if (phase.contains("Download", true)) {
                                                         gaugeUpload = false
+                                                        gaugeLiveMbps = needleMbps ?: 0f
                                                         liveDownloadMbps = mbps.coerceAtLeast(0f)
                                                     }
                                                     if (loggedPhase != phase) { loggedPhase = phase; activityLog.add(phase + " phase started"); while (activityLog.size > 8) activityLog.removeAt(0) }
                                                     if (mbps > 0f) { val isUpload = phase.contains("Upload", true); val target = if (isUpload) uploadSamples else downloadSamples; target.add(mbps); if (target.size > 80) target.removeAt(0); if (isUpload) { uploadAverage = target.average(); uploadPeak = (target.maxOrNull() ?: mbps).toDouble() } else { downloadAverage = target.average(); downloadPeak = (target.maxOrNull() ?: mbps).toDouble() }; val line = phase + " live rate: " + String.format(java.util.Locale.US, "%.1f Mbps", mbps); if (activityLog.lastOrNull()?.startsWith(phase + " live rate:") == true) activityLog[activityLog.lastIndex] = line else { activityLog.add(line); if (activityLog.size > 8) activityLog.removeAt(0) } }
                                                 }, { isUploadPhase, completedMbps ->
-                                                    if (isUploadPhase) uploadPhaseMbps = completedMbps
-                                                    else downloadPhaseMbps = completedMbps
+                                                    if (isUploadPhase) {
+                                                        gaugeUpload = true
+                                                        uploadPhaseMbps = completedMbps
+                                                    } else {
+                                                        gaugeUpload = false
+                                                        downloadPhaseMbps = completedMbps
+                                                    }
+                                                    gaugeLiveMbps = completedMbps.toFloat()
                                                 }, { p, j -> ping = p; jitter = j; livePing = p; liveJitter = j }, { message -> scope.launch { logDiagnostic(message); when { message.startsWith("DISCOVERY TIME:") -> serverDiscoveryMs = message.substringAfter(":").trim().removeSuffix("ms").toLongOrNull() ?: -1L; message.startsWith("DISCOVERY STATUS:") -> serverDiscoveryStatus = message.substringAfter(":").trim() } } })
                                                 val original = candidate ?: error("No Mauritius server available")
                                                  val result = try { measure(original) } catch (first: Exception) {
                                                      if (first is CancellationException) throw first
-                                                     if (changedDuringTest.get() || connectivity.activeNetwork != networkAtStart) throw first
+                                                     if (networkCancellation.hasChanged() || connectivity.activeNetwork != networkAtStart) throw first
                                                      logDiagnostic("SERVER_FAILURE " + original.serverId + ": " + first.javaClass.simpleName)
                                                      status = "Refreshing failed server…"
                                                      val refreshed = withContext(Dispatchers.IO) { SpeedEngine.discoverCandidates() }
@@ -563,6 +588,8 @@ private fun SpeedTesterApp(context: Context) {
                                                      downloadAverage = 0.0; downloadPeak = 0.0
                                                      uploadAverage = 0.0; uploadPeak = 0.0
                                                      liveDownloadMbps = 0f; liveUploadMbps = 0f
+                                                     gaugeLiveMbps = 0f
+                                                     gaugeUpload = false
                                                      logDiagnostic("SERVER_FAILOVER " + original.serverId + " -> " + alternate.serverId)
                                                      candidate = alternate
                                                      selectedServer = alternate
@@ -573,8 +600,9 @@ private fun SpeedTesterApp(context: Context) {
                                                 serverIp = result.serverIp; dnsLookupMs = result.dnsLookupMs
                                                 downloadAverage = result.downloadAverage; downloadPeak = result.downloadPeak; uploadAverage = result.uploadAverage; uploadPeak = result.uploadPeak
                                                 loadedPing = result.loadedPing; loadedJitter = result.loadedJitter; failedProbes = result.failedProbes; probeCount = result.probeCount
-                                                val connectionSnapshot = readNetworkInfo(context)
-                                                val networkChanged = changedDuringTest.get() ||
+                                                val connectionSnapshot = withContext(Dispatchers.IO) { readNetworkInfo(context) }
+                                                netInfo = connectionSnapshot
+                                                val networkChanged = networkCancellation.hasChanged() ||
                                                     connectivity.activeNetwork != networkAtStart ||
                                                     NetworkSnapshotPolicy.changed(
                                                         testNetworkAtStart.type, connectionSnapshot.type,
@@ -588,17 +616,31 @@ private fun SpeedTesterApp(context: Context) {
                                                     return@launch
                                                 }
                                                 val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(candidate?.host.orEmpty(), candidate?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
-                                                if (!persistHistory((listOf(saved) + history).take(100))) {
+                                                if (!persistHistory { (listOf(saved) + it).take(100) }) {
                                                     status = "Test complete — history not saved"
                                                     return@launch
                                                 }
+                                                resultSaved = true
  logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
-                                            } catch (e: Exception) { if (e is CancellationException) throw e; if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
+                                            } catch (e: CancellationException) {
+                                                if (networkCancellation.hasChanged()) {
+                                                    status = "Network changed — test cancelled"
+                                                    error = "Connection changed during the test. Retry on a stable network."
+                                                    gaugeLiveMbps = 0f
+                                                    logDiagnostic("NETWORK_CHANGED_DURING_TEST — transfer cancelled")
+                                                }
+                                                throw e
+                                            } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally {
                                                 if (watchingNetwork) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
-                                                testing = false; gaugeUpload = false; progress = 1f; netInfo = readNetworkInfo(context)
+                                                if (!resultSaved) gaugeUpload = false
+                                                testing = false
+                                                progress = 1f
                                             }
                                         }
+                                        networkCancellation.attach(testJob)
+                                        // Check after registration too, in case the default network changed immediately.
+                                        if (connectivity.activeNetwork != networkAtStart) networkCancellation.networkChanged()
                                     }
                                 }, enabled = !testing && selectedServerLive != null, modifier = Modifier.fillMaxWidth().height(58.dp)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(if (testing) "TEST RUNNING…" else if (selectedServerLive == null) "SELECT A SERVER FIRST" else "START TEST", fontWeight = FontWeight.Bold) }
                                 if (testing) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth()) }
@@ -671,7 +713,7 @@ private fun SpeedTesterApp(context: Context) {
                             
                     },
                     clear = {
-                        persistHistory(emptyList())
+                        scope.launch { persistHistory { emptyList() } }
                     },
                     open = { result -> selectedHistory = result; activeTab = 8 }
                 )
@@ -686,10 +728,12 @@ private fun SpeedTesterApp(context: Context) {
                             back = { selectedHistory = null; activeTab = 1 },
                             share = { shareTestResult(context, result) },
                             delete = {
-                                val remaining = history.toMutableList().apply { remove(result) }
-                                if (persistHistory(remaining)) {
-                                    selectedHistory = null
-                                    activeTab = 1
+                                scope.launch {
+                                    val deleted = persistHistory { it.toMutableList().apply { remove(result) } }
+                                    if (deleted && activeTab == 8 && selectedHistory == result) {
+                                        selectedHistory = null
+                                        activeTab = 1
+                                    }
                                 }
                             }
                         )
@@ -1335,8 +1379,11 @@ private object SpeedEngine {
         }
         // Latency to every server, measured in parallel too.
         val measured = kotlinx.coroutines.coroutineScope {
+            // Bound concurrent TCP probes to avoid socket bursts on older phones and mobile networks.
+            val probeSlots = kotlinx.coroutines.sync.Semaphore(8)
             found.values.map { candidate ->
                 async {
+                    probeSlots.withPermit {
                     val hostPort = candidate.host
                     val host = hostPort.substringBeforeLast(":", hostPort)
                     val port = hostPort.substringAfterLast(":", "").toIntOrNull() ?: 443
@@ -1346,6 +1393,7 @@ private object SpeedEngine {
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                     }.getOrNull()
                     candidate.copy(latencyMs = latency)
+                    }
                 }
             }.awaitAll()
         }
@@ -1362,27 +1410,21 @@ private object SpeedEngine {
 
     /**
      * Runs [STREAMS] transfers in parallel for [TEST_SECONDS], reporting the combined rate about every
-     * 250 ms. [transfer] performs one request; it adds to the counter as bytes move, and should stop
-     * when the flag is set. Calls still running at the end are cancelled.
+     * 250 ms. [transfer] performs one cancellable request and adds to the counter as bytes move.
+     * Upload accounting uses server-acknowledged bytes.
      */
-    /** Tracks acknowledged upload bytes and latency while data transfer is active. */
     private suspend fun runPhase(
-        label: String, from: Float, to: Float, host: String, port: Int, verifyUpload: Boolean,
-        onUpdate: (String, Float, Float) -> Unit, onLog: (String) -> Unit,
+        label: String, from: Float, to: Float, probeAddress: java.net.InetSocketAddress, verifyUpload: Boolean,
+        onUpdate: (String, Float, Float, Float?) -> Unit, onLog: (String) -> Unit,
         transfer: (
-            stop: java.util.concurrent.atomic.AtomicBoolean,
-            sent: java.util.concurrent.atomic.AtomicLong,
+            transfers: PhaseTransfers,
+            moved: java.util.concurrent.atomic.AtomicLong,
             acknowledged: java.util.concurrent.atomic.AtomicLong,
-            calls: MutableSet<okhttp3.Call>
         ) -> Unit,
     ): Phase = kotlinx.coroutines.coroutineScope {
-        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val transfers = PhaseTransfers()
         val sent = java.util.concurrent.atomic.AtomicLong()
         val acknowledged = java.util.concurrent.atomic.AtomicLong()
-        val calls: MutableSet<okhttp3.Call> = java.util.Collections.newSetFromMap(
-            java.util.concurrent.ConcurrentHashMap<okhttp3.Call, Boolean>())
-        val sockets: MutableSet<Socket> = java.util.Collections.newSetFromMap(
-            java.util.concurrent.ConcurrentHashMap<Socket, Boolean>())
         val failures = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
         val probeFailures = java.util.concurrent.atomic.AtomicInteger()
         val probeAttempts = java.util.concurrent.atomic.AtomicInteger()
@@ -1390,13 +1432,13 @@ private object SpeedEngine {
         val workers = (1..STREAMS).map { n ->
             launch(Dispatchers.IO) {
                 var retries = 0
-                while (!stop.get()) {
+                while (!transfers.stopped) {
                     try {
-                        transfer(stop, sent, acknowledged, calls)
+                        transfer(transfers, sent, acknowledged)
                         retries = 0
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
-                        if (stop.get()) break
+                        if (transfers.stopped) break
                         failures.compareAndSet(null, e)
                         onLog(label + " stream " + n + ": " + e.javaClass.simpleName)
                         if (++retries >= 3) break
@@ -1408,20 +1450,20 @@ private object SpeedEngine {
         val probeWorker = launch(Dispatchers.IO) {
             repeat(7) {
                 kotlinx.coroutines.delay(350)
-                if (stop.get()) return@launch
+                if (transfers.stopped) return@launch
                 val socket = Socket()
-                sockets.add(socket)
-                probeAttempts.incrementAndGet()
-                try {
-                    val started = System.nanoTime()
-                    socket.connect(java.net.InetSocketAddress(host, port), 1100)
-                    if (!stop.get()) latency.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    if (!stop.get()) probeFailures.incrementAndGet()
-                } finally {
-                    sockets.remove(socket)
-                    runCatching { socket.close() }
+                transfers.run(cancel = { runCatching { socket.close() } }) {
+                    probeAttempts.incrementAndGet()
+                    try {
+                        val started = System.nanoTime()
+                        socket.connect(probeAddress, 1100)
+                        if (!transfers.stopped) latency.add(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        if (!transfers.stopped) probeFailures.incrementAndGet()
+                    } finally {
+                        runCatching { socket.close() }
+                    }
                 }
                 kotlinx.coroutines.delay(400)
             }
@@ -1429,35 +1471,51 @@ private object SpeedEngine {
         try {
             val start = System.nanoTime()
             val duration = TimeUnit.SECONDS.toNanos(TEST_SECONDS)
+            val gaugeRate = GaugeTransferRate(start)
             var lastAt = start
             var lastBytes = 0L
+            var lastMovedBytes = 0L
+            var unacknowledgedIntervals = 0
+            var longestSampleNanos = 0L
             var peak = 0.0
             var warmupBytes = -1L
             var warmupAt = 0L
             while (System.nanoTime() - start < duration) {
                 kotlinx.coroutines.delay(250)
                 val now = System.nanoTime()
-                val total = TransferAccounting.countableBytes(sent.get(), acknowledged.get(), verifyUpload)
+                val movedBytes = sent.get()
+                val total = TransferAccounting.countableBytes(movedBytes, acknowledged.get(), verifyUpload)
                 val interval = ((now - lastAt) / 1_000_000_000.0).coerceAtLeast(.001)
                 val instant = (total - lastBytes).coerceAtLeast(0L) * 8.0 / interval / 1_000_000.0
+                val needleMbps = gaugeRate.sample(now, movedBytes)
+                if (verifyUpload && total == lastBytes && movedBytes > lastMovedBytes) unacknowledgedIntervals++
+                longestSampleNanos = maxOf(longestSampleNanos, now - lastAt)
                 if (warmupBytes < 0 && now - start >= TimeUnit.MILLISECONDS.toNanos(WARMUP_MS)) {
                     warmupBytes = total
                     warmupAt = now
                 }
                 peak = maxOf(peak, instant)
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
-                onUpdate(label, from + (to - from) * fraction, instant.toFloat())
+                onUpdate(label, from + (to - from) * fraction, instant.toFloat(), needleMbps)
                 lastAt = now
                 lastBytes = total
+                lastMovedBytes = movedBytes
                 if (workers.all { it.isCompleted }) break
             }
-            stop.set(true)
-            calls.toList().forEach { it.cancel() }
-            sockets.toList().forEach { runCatching { it.close() } }
+            transfers.stop()
+            workers.forEach { it.cancel() }
             probeWorker.cancelAndJoin()
             workers.forEach { it.join() }
             val end = System.nanoTime()
             val total = TransferAccounting.countableBytes(sent.get(), acknowledged.get(), verifyUpload)
+            onLog("$label gauge: longest sample gap ${TimeUnit.NANOSECONDS.toMillis(longestSampleNanos)} ms, " +
+                "$unacknowledgedIntervals intervals with upload traffic awaiting acknowledgment")
+            if (longestSampleNanos > TimeUnit.MILLISECONDS.toNanos(750)) {
+                onLog("$label warning: speed samples delayed; the gauge may briefly lag on a busy device")
+            }
+            if (verifyUpload && unacknowledgedIntervals >= 3) {
+                onLog("$label note: outgoing traffic is waiting for server confirmation; live needle is an estimate")
+            }
             if (total <= 0L) error(label + ": no server-accepted data; " +
                 (failures.get()?.javaClass?.simpleName ?: "no successful transfer"))
             val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
@@ -1468,18 +1526,21 @@ private object SpeedEngine {
                 else average
             val samples = synchronized(latency) { latency.toList() }
             onLog(label + " concurrent loaded latency probes: " + samples.size + "/" + probeAttempts.get())
+            if (samples.isEmpty()) onLog("$label warning: loaded latency unavailable; no successful TCP probes")
             Phase(steady, average, maxOf(peak, steady), total, seconds,
                 samples, probeFailures.get(), probeAttempts.get())
         } finally {
-            stop.set(true)
-            calls.toList().forEach { it.cancel() }
-            sockets.toList().forEach { runCatching { it.close() } }
+            transfers.stop()
             workers.forEach { it.cancel() }
             probeWorker.cancel()
         }
     }
 
-    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float) -> Unit, onPhaseFinished: (Boolean, Double) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+    suspend fun run(base: String, selectedServer: NdtServerCandidate?, onServer: (ServerDetails) -> Unit, onUpdate: (String, Float, Float, Float?) -> Unit, onPhaseFinished: (Boolean, Double) -> Unit, onMetrics: (Long, Double) -> Unit, onLog: (String) -> Unit): SpeedOutcome = withContext(Dispatchers.IO) {
+        val publishProgress: (String, Float, Float, Float?) -> Unit = { phase, progress, rate, needleRate ->
+            // Drawing or input work on main should not delay the transfer sampling clock.
+            launch(Dispatchers.Main.immediate) { onUpdate(phase, progress, rate, needleRate) }
+        }
         val server = selectedServer ?: error("Select a Mauritius Ookla-compatible server first")
         val rawUploadUri = java.net.URI(server.uploadUrl)
         // Ookla-hosted servers can advertise a provider alias whose TLS certificate is issued
@@ -1507,18 +1568,21 @@ private object SpeedEngine {
         onServer(ServerDetails(server.host, server.city, server.country, server.latitude, server.longitude))
 
         val dnsStart = System.nanoTime()
-        val resolvedAddress = runCatching { InetAddress.getAllByName(host).firstOrNull()?.hostAddress.orEmpty() }.getOrDefault("")
+        val resolved = runCatching { InetAddress.getAllByName(host).firstOrNull() }.getOrNull()
+        val resolvedAddress = resolved?.hostAddress.orEmpty()
         val dnsLookupMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - dnsStart)
         onLog("DNS lookup: " + (resolvedAddress.ifBlank { "failed" }) + " in " + dnsLookupMs + "ms")
+        val probeAddress = if (resolved != null) java.net.InetSocketAddress(resolved, port)
+            else java.net.InetSocketAddress(host, port)
         val pings = mutableListOf<Long>()
         repeat(8) { index ->
             val started = System.nanoTime()
-            Socket().use { it.connect(java.net.InetSocketAddress(host, port), 3000) }
+            Socket().use { it.connect(probeAddress, 3000) }
             val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             pings.add(ms)
             onLog("TCP latency probe " + (index + 1) + "/8: " + ms + "ms")
             onMetrics(pings.average().toLong(), if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0)
-            onUpdate("Measuring latency", .02f + .06f * pings.size / 8f, 0f)
+            publishProgress("Measuring latency", .02f + .06f * pings.size / 8f, 0f, null)
             kotlinx.coroutines.delay(100)
         }
         val ping = pings.average().toLong()
@@ -1528,34 +1592,31 @@ private object SpeedEngine {
         // requests it again whenever it finishes, until the time is up.
         val downloadBase = java.net.URI(uploadEndpoint).let { u -> u.path.substringBeforeLast("/", "") + "/random4000x4000.jpg" }
         onLog("Download endpoint: " + java.net.URI(uploadUri.scheme, null, uploadUri.host, uploadUri.port, downloadBase, null, null))
-        onUpdate("Downloading · Ookla server", .08f, 0f)
-        val down = runPhase("Downloading · Ookla server", .08f, .50f, host, port, false, onUpdate, onLog) { stop, counter, accepted, calls ->
+        publishProgress("Downloading · Ookla server", .08f, 0f, null)
+        val down = runPhase("Downloading · Ookla server", .08f, .50f, probeAddress, false, publishProgress, onLog) { transfers, counter, _ ->
             val url = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, downloadBase, "nocache=" + System.nanoTime(), null).toString()
             val call = client.newCall(Request.Builder().url(url).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
-            calls.add(call)
-            try {
+            transfers.run(cancel = call::cancel) {
                 call.execute().use { response ->
                     if (!response.isSuccessful) error("Ookla download endpoint returned HTTP " + response.code + ". This server may not support the compatible transfer endpoint.")
                     val body = response.body ?: error("Ookla download endpoint returned an empty response")
                     body.byteStream().use { input ->
                         val buffer = ByteArray(64 * 1024)
-                        while (!stop.get()) {
+                        while (!transfers.stopped) {
                             val count = input.read(buffer)
                             if (count < 0) break
                             counter.addAndGet(count.toLong())
                         }
                     }
                 }
-            } finally {
-                calls.remove(call)
             }
         }
-        onPhaseFinished(false, down.mbps)
+        launch(Dispatchers.Main.immediate) { onPhaseFinished(false, down.mbps) }
         onLog("DOWNLOAD: bytes=${down.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, down.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, down.averageMbps) + " Mbps")
 
-        onUpdate("Uploading · Ookla server", .55f, 0f)
+        publishProgress("Uploading · Ookla server", .55f, 0f, null)
         val payload = ByteArray(256 * 1024).also { java.security.SecureRandom().nextBytes(it) }
-        val up = runPhase("Uploading · Ookla server", .55f, .95f, host, port, true, onUpdate, onLog) { stop, counter, accepted, calls ->
+        val up = runPhase("Uploading · Ookla server", .55f, .95f, probeAddress, true, publishProgress, onLog) { transfers, counter, accepted ->
             val nonce = java.util.UUID.randomUUID().toString()
             val requestUrl = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, uploadUri.path, "nocache=$nonce", null).toString()
             // A 256 KiB request enables acceptance-based throughput even on slower connections.
@@ -1563,34 +1624,29 @@ private object SpeedEngine {
                 override fun contentType() = "application/octet-stream".toMediaType()
                 override fun contentLength() = payload.size.toLong()
                 override fun writeTo(sink: okio.BufferedSink) {
-                    repeat(1) {
-                        var offset = 0
-                        while (offset < payload.size) {
-                            if (stop.get()) throw java.io.IOException("Test time is up")
-                            val n = minOf(64 * 1024, payload.size - offset)
-                            sink.write(payload, offset, n)
-                            sink.flush()
-                            counter.addAndGet(n.toLong())
-                            offset += n
-                        }
+                    var offset = 0
+                    while (offset < payload.size) {
+                        if (transfers.stopped) throw java.io.IOException("Test time is up")
+                        // Complete Okio segments are emitted by write without flushing each chunk.
+                        val n = minOf(16 * 1024, payload.size - offset)
+                        sink.write(payload, offset, n)
+                        counter.addAndGet(n.toLong())
+                        offset += n
                     }
                 }
             }
             val call = client.newCall(Request.Builder().url(requestUrl).post(body).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
-            calls.add(call)
-            try {
+            transfers.run(cancel = call::cancel) {
                 call.execute().use {
                     if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code)
                     accepted.addAndGet(payload.size.toLong())
                 }
-            } finally {
-                calls.remove(call)
             }
         }
-        onPhaseFinished(true, up.mbps)
+        launch(Dispatchers.Main.immediate) { onPhaseFinished(true, up.mbps) }
         onLog("UPLOAD: bytes=${up.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, up.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, up.averageMbps) + " Mbps")
 
-        onUpdate("Checking connection stability", .96f, 0f)
+        publishProgress("Checking connection stability", .96f, 0f, null)
         val loadedPing = TransferAccounting.loadedPing(down.loadedPing, up.loadedPing)
         val loadedJitter = TransferAccounting.loadedJitter(down.loadedJitter, up.loadedJitter)
         val failed = down.failedProbes + up.failedProbes
@@ -1598,7 +1654,7 @@ private object SpeedEngine {
         onLog("Concurrent loaded TCP latency: download=" + down.loadedPing + " ms, upload=" +
             up.loadedPing + " ms; combined worst=" + loadedPing + " ms")
         onLog("Ookla-compatible server: " + server.host + " (" + locationName + ")")
-        onUpdate("Complete", 1f, 0f)
+        publishProgress("Complete", 1f, 0f, null)
         SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, totalProbes, null, null, resolvedAddress, dnsLookupMs)
     }
 }

@@ -40,8 +40,8 @@ class SpeedEngineRegressionTest {
     @Test fun cancellationClosesActiveCallsAndSockets() {
         val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
         val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
-        assertTrue(engine.contains("finally {\n            stop.set(true)"))
-        assertTrue(engine.contains("calls.toList().forEach { it.cancel() }"))
-        assertTrue(engine.contains("sockets.toList().forEach { runCatching { it.close() } }"))
+        assertTrue(engine.contains("finally {\n            transfers.stop()"))
+        assertEquals(2, engine.split("transfers.run(cancel = call::cancel)").size - 1)
+        assertTrue(engine.contains("transfers.run(cancel = { runCatching { socket.close() } })"))
     }
 }

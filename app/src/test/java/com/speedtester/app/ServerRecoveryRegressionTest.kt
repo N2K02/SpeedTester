@@ -28,7 +28,7 @@ class ServerRecoveryRegressionTest {
         assertTrue(code.contains("lastRefresh > 900_000L"))
         assertTrue(code.contains("SERVER_FAILOVER"))
         assertTrue(code.contains("downloadSamples.clear(); uploadSamples.clear()"))
-        assertTrue(code.contains("changedDuringTest.get() || connectivity.activeNetwork != networkAtStart"))
+        assertTrue(code.contains("networkCancellation.hasChanged() || connectivity.activeNetwork != networkAtStart"))
         assertTrue(code.contains("NET_CAPABILITY_VALIDATED"))
         assertTrue(code.contains("NET_CAPABILITY_CAPTIVE_PORTAL"))
     }

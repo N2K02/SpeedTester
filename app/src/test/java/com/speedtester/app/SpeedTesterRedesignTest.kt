@@ -64,7 +64,7 @@ class SpeedTesterRedesignTest {
             File("src/main/java/com/speedtester/app")).first { it.isDirectory }
         val main = File(p, "MainActivity.kt").readText()
         val history = File(p, "SpeedTestHistoryScreen.kt").readText()
-        assertTrue(main.contains("SpeedometerDial(gaugeSpeed"))
+        assertTrue(main.contains("SpeedometerDial("))
         assertTrue(main.contains("6 -> SpeedServerDirectory("))
         assertTrue(main.contains("7 -> LazyColumn("))
         assertTrue(main.contains("8 -> {"))
