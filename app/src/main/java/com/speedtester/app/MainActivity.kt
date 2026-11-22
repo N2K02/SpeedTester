@@ -524,7 +524,7 @@ private fun SpeedTesterApp(context: Context) {
                                             connectivity.registerDefaultNetworkCallback(networkCallback)
                                             true
                                         }.getOrDefault(false)
-                                        val testJob = scope.launch {
+                                        val testJob = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                                             var resultSaved = false
                                             try {
                                                 val testNetworkAtStart = withContext(Dispatchers.IO) { readNetworkInfo(context) }
