@@ -1411,7 +1411,7 @@ private object SpeedEngine {
     /**
      * Runs [STREAMS] transfers in parallel for [TEST_SECONDS], reporting the combined rate about every
      * 250 ms. [transfer] performs one cancellable request and adds to the counter as bytes move.
-     * Upload accounting uses server-acknowledged bytes.
+     * Upload throughput uses payload bytes written, with server confirmation required for validity.
      */
     private suspend fun runPhase(
         label: String, from: Float, to: Float, probeAddress: java.net.InetSocketAddress, verifyUpload: Boolean,
@@ -1488,7 +1488,7 @@ private object SpeedEngine {
                 val interval = ((now - lastAt) / 1_000_000_000.0).coerceAtLeast(.001)
                 val instant = (total - lastBytes).coerceAtLeast(0L) * 8.0 / interval / 1_000_000.0
                 val needleMbps = gaugeRate.sample(now, movedBytes)
-                if (verifyUpload && acknowledged.get() == 0L && movedBytes > lastMovedBytes) unacknowledgedIntervals++
+                if (verifyUpload && acknowledged.get() < movedBytes && movedBytes > lastMovedBytes) unacknowledgedIntervals++
                 longestSampleNanos = maxOf(longestSampleNanos, now - lastAt)
                 throughput.record(now, total)
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
@@ -1513,14 +1513,14 @@ private object SpeedEngine {
             if (verifyUpload && unacknowledgedIntervals >= 3) {
                 onLog("$label note: outgoing traffic is waiting for server confirmation; live needle is an estimate")
             }
-            if (total <= 0L || (verifyUpload && !TransferAccounting.uploadHasServerConfirmation(confirmed))) {
+            if (total <= 0L || (verifyUpload && !TransferAccounting.uploadHasServerConfirmation(confirmed, total))) {
                 error(label + ": no confirmed transfer; " +
                     (failures.get()?.javaClass?.simpleName ?: "no successful server response"))
             }
             if (verifyUpload) {
                 onLog("$label upload throughput measured from bytes written; server confirmed " +
                     "$confirmed / $total bytes before cutoff")
-                if (confirmed < total / 2) {
+                if (confirmed < total) {
                     onLog("$label note: many outgoing bytes were still awaiting confirmation at cutoff")
                 }
             }
