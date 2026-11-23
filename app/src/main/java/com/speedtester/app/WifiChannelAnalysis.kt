@@ -1,7 +1,6 @@
 package com.speedtester.app
 
 import kotlin.math.abs
-import kotlin.math.max
 
 /** One measured access point (BSSID). No geolocation or synthetic data. */
 internal data class WifiAccessPoint(
@@ -59,12 +58,24 @@ internal object WifiChannelAnalysis {
         // Preferred scanning channel centres for 80 MHz 6 GHz blocks.
         WifiBand.SIX -> (5..229 step 16).toList()
     }
+    fun centerFrequencyMhz(channel: Int, band: WifiBand): Int = when (band) {
+        WifiBand.TWO_FOUR -> if (channel == 14) 2484 else 2407 + channel * 5
+        WifiBand.FIVE -> 5000 + channel * 5
+        WifiBand.SIX -> if (channel == 2) 5935 else 5950 + channel * 5
+    }
+
     fun rating(channel: Int, band: WifiBand, points: List<WifiAccessPoint>): WifiChannelRating {
         var affected = 0
         var congestion = 0.0
         for (point in points.filter { it.band == band && it.channel > 0 }) {
-            val radius = max(2.5, point.widthMhz.coerceAtLeast(20) / 10.0 + 1.0)
-            val proximity = (1.0 - abs(channel - point.channel) / radius).coerceIn(0.0, 1.0)
+            // Channel numbers have different frequency spacing in 2.4/5/6 GHz.
+            // Compare actual spectral overlap, not channel-number distance: adjacent
+            // 5 GHz 20 MHz channels differ by 4 numbers, but do not overlap.
+            val candidateCenter = centerFrequencyMhz(channel, band)
+            val pointWidth = point.widthMhz.coerceIn(20, 320).toDouble()
+            val halfSpan = (20.0 + pointWidth) / 2.0
+            val separation = abs(candidateCenter - point.frequencyMhz).toDouble()
+            val proximity = (1.0 - separation / halfSpan).coerceIn(0.0, 1.0)
             if (proximity <= 0.0) continue
             affected++
             val strength = (point.rssiDbm + 100).coerceIn(5, 75) / 75.0
