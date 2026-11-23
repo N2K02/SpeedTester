@@ -139,7 +139,7 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
                 status = if (results.isEmpty()) "Scan complete · no networks" else
                     if (age >= 0) "Scan complete · results ${age}s old" else "Scan complete"
             } else if (results.isNotEmpty()) {
-                status = if (age >= 0) "Cached scan · " + age + "s old" else "Cached Wi-Fi scan"
+                status = if (age >= 0) "Cached scan · " + age + "s old (Android may throttle scans)" else "Cached Wi-Fi scan"
             } else {
                 status = "No Wi-Fi networks detected"
             }
@@ -166,7 +166,7 @@ internal fun WifiAnalyzerScreen(context: Context, modifier: Modifier = Modifier)
         readLatest(false)
         try {
             if (wifi.startScan()) status = "Scanning nearby access points…"
-            else status = "Scan limited by Android · showing cached results"
+            else status = "Android scan throttled · showing cached access points; wait before refreshing"
         } catch (e: SecurityException) {
             status = "Wi-Fi scan permission denied"
         } catch (e: RuntimeException) {
@@ -477,7 +477,7 @@ private fun EmptyNetworks(band: WifiBand) {
 
 @Composable
 private fun BestChannelCard(best: WifiChannelRating?, band: WifiBand) {
-    AnalyzerCard("🏆  Recommended Channel", "Lowest observed channel overlap") {
+    AnalyzerCard("🏆  Recommended Channel", "Lowest estimated overlap in actual MHz") {
         if (best == null) EmptyNetworks(band)
         else Row(verticalAlignment = Alignment.CenterVertically) {
             Text(best.channel.toString(), color = wifiPurple,
@@ -487,8 +487,10 @@ private fun BestChannelCard(best: WifiChannelRating?, band: WifiBand) {
                 Text(if (best.congestion < 0.15) "Good" else if (best.congestion < 0.65) "Moderate" else "Busy",
                     fontWeight = FontWeight.Bold,
                     color = if (best.congestion < 0.15) Color(0xFF4BD77B) else Color(0xFFF0C24D))
-                Text("Estimated best · " + band.label + " GHz",
+                Text("Estimated best · " + band.label + " GHz · " + best.affectedNetworks + " nearby overlapping APs",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Based on signal level, channel width and overlapping frequencies; does not measure router traffic.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
