@@ -17,7 +17,8 @@ class SpeedEngineRegressionTest {
         val delayedConfirmed = 262_144L
         assertEquals(transmitted, TransferAccounting.measuredBytes(transmitted))
         assertEquals(delayedConfirmed, TransferAccounting.countableBytes(transmitted, delayedConfirmed, true))
-        assertTrue(TransferAccounting.uploadHasServerConfirmation(delayedConfirmed))
+        assertFalse(TransferAccounting.uploadHasServerConfirmation(delayedConfirmed, transmitted))
+        assertTrue(TransferAccounting.uploadHasServerConfirmation(10_000_000L, transmitted))
         val rate = ThroughputSamples(0L)
         rate.record(1_000_000_000L, transmitted)
         assertEquals(100.0, rate.averageMbps(), 0.00001)
@@ -27,6 +28,8 @@ class SpeedEngineRegressionTest {
         assertFalse(TransferAccounting.uploadHasServerConfirmation(0L))
         assertFalse(TransferAccounting.uploadHasServerConfirmation(-1L))
         assertTrue(TransferAccounting.uploadHasServerConfirmation(1L))
+        assertFalse(TransferAccounting.uploadHasServerConfirmation(1L, 5_000_000L))
+        assertTrue(TransferAccounting.uploadHasServerConfirmation(524_288L, 1_048_576L))
         assertEquals(0L, TransferAccounting.measuredBytes(-300L))
     }
 
