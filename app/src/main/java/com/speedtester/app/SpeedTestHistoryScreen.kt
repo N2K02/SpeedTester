@@ -34,8 +34,11 @@ internal enum class HistoryFilter { ALL, WIFI, MOBILE }
 internal enum class HistoryOrder { LATEST, OLDEST, FASTEST, LOWEST_PING }
 
 internal object HistoryViewLogic {
-    fun visible(results: List<TestResult>, filter: HistoryFilter, order: HistoryOrder): List<TestResult> {
+    fun visible(results: List<TestResult>, filter: HistoryFilter, order: HistoryOrder,
+                serverQuery: String = ""): List<TestResult> {
+        val query = serverQuery.trim()
         val list = results.filter {
+            (query.isEmpty() || it.server.contains(query, ignoreCase = true)) &&
             when (filter) {
                 HistoryFilter.ALL -> true
                 HistoryFilter.WIFI -> it.networkType.contains("Wi-Fi", true)
@@ -125,11 +128,12 @@ internal fun SpeedTestHistoryScreen(
     export: () -> Unit, clear: () -> Unit, open: (TestResult) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var filter by remember { mutableStateOf(HistoryFilter.ALL) }
-    var order by remember { mutableStateOf(HistoryOrder.LATEST) }
+    var filter by rememberSaveable { mutableStateOf(HistoryFilter.ALL) }
+    var order by rememberSaveable { mutableStateOf(HistoryOrder.LATEST) }
+    var serverQuery by rememberSaveable { mutableStateOf("") }
     var sorting by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
-    val results = HistoryViewLogic.visible(history, filter, order)
+    val results = HistoryViewLogic.visible(history, filter, order, serverQuery)
     val wifiCount = history.count { it.networkType.contains("Wi-Fi", true) }
     val mobileCount = history.count {
         it.networkType.contains("Mobile", true) || it.networkType.contains("Cellular", true)
@@ -179,6 +183,16 @@ internal fun SpeedTestHistoryScreen(
             }
         }
         item {
+            OutlinedTextField(
+                value = serverQuery,
+                onValueChange = { serverQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Filter by test server") },
+                placeholder = { Text("Provider, city, or server name") }
+            )
+        }
+        item {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 TextButton(onClick = { sorting = true }) {
                     Icon(Icons.Default.Sort, null, Modifier.size(18.dp))
@@ -202,7 +216,7 @@ internal fun SpeedTestHistoryScreen(
                     Spacer(Modifier.height(10.dp))
                     Text(if (history.isEmpty()) "No tests yet" else "No tests match this filter")
                     Text(if (history.isEmpty()) "Run a speed test from Home to see the result here."
-                        else "Select another network filter.",
+                        else "Adjust the network or server filter.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
