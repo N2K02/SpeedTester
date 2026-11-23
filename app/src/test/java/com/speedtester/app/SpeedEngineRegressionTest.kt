@@ -11,6 +11,18 @@ class SpeedEngineRegressionTest {
         assertEquals(2_097_152L, TransferAccounting.countableBytes(2_097_152L, 0L, false))
     }
 
+    @Test fun originalThroughputAndUploadRequestSizingStayRestored() {
+        val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
+        val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
+        assertTrue(engine.contains("TransferAccounting.countableBytes(movedBytes, acknowledged.get(), verifyUpload)"))
+        assertTrue(engine.contains("warmupBytes = total"))
+        assertTrue(engine.contains("peak = maxOf(peak, instant)"))
+        assertTrue(engine.contains("ByteArray(256 * 1024)"))
+        assertTrue(engine.contains("accepted.addAndGet(payload.size.toLong())"))
+        assertFalse(engine.contains("ThroughputSamples("))
+        assertFalse(engine.contains("UploadRequestSizing.choose("))
+    }
+
     @Test fun loadedPingPreservesWorstConcurrentPhaseAndMissingSignals() {
         assertEquals(210L, TransferAccounting.loadedPing(210L, 95L))
         assertEquals(95L, TransferAccounting.loadedPing(-1L, 95L))
