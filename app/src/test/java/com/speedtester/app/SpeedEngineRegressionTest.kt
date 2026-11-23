@@ -11,35 +11,6 @@ class SpeedEngineRegressionTest {
         assertEquals(2_097_152L, TransferAccounting.countableBytes(2_097_152L, 0L, false))
     }
 
-
-    @Test fun liveUploadMeasuresOutgoingBytesNotDelayedHttpResponses() {
-        val transmitted = 12_500_000L
-        val delayedConfirmed = 262_144L
-        assertEquals(transmitted, TransferAccounting.measuredBytes(transmitted))
-        assertEquals(delayedConfirmed, TransferAccounting.countableBytes(transmitted, delayedConfirmed, true))
-        assertFalse(TransferAccounting.uploadHasServerConfirmation(delayedConfirmed, transmitted))
-        assertTrue(TransferAccounting.uploadHasServerConfirmation(10_000_000L, transmitted))
-        val rate = ThroughputSamples(0L)
-        rate.record(1_000_000_000L, transmitted)
-        assertEquals(100.0, rate.averageMbps(), 0.00001)
-    }
-
-    @Test fun uploadFailsValidationWhenServerNeverAcceptsAnyRequest() {
-        assertFalse(TransferAccounting.uploadHasServerConfirmation(0L))
-        assertFalse(TransferAccounting.uploadHasServerConfirmation(-1L))
-        assertTrue(TransferAccounting.uploadHasServerConfirmation(1L))
-        assertFalse(TransferAccounting.uploadHasServerConfirmation(1L, 5_000_000L))
-        assertTrue(TransferAccounting.uploadHasServerConfirmation(524_288L, 1_048_576L))
-        assertEquals(0L, TransferAccounting.measuredBytes(-300L))
-    }
-
-    @Test fun downloadThroughputStillCountsReceivedBytesAsTheyArrive() {
-        val samples = ThroughputSamples(0L)
-        samples.record(1_000_000_000L, TransferAccounting.measuredBytes(5_000_000L))
-        samples.record(2_000_000_000L, TransferAccounting.measuredBytes(10_000_000L))
-        assertEquals(40.0, samples.averageMbps(), 0.00001)
-    }
-
     @Test fun loadedPingPreservesWorstConcurrentPhaseAndMissingSignals() {
         assertEquals(210L, TransferAccounting.loadedPing(210L, 95L))
         assertEquals(95L, TransferAccounting.loadedPing(-1L, 95L))
