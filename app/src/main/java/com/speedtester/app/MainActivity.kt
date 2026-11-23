@@ -1482,11 +1482,13 @@ private object SpeedEngine {
                 kotlinx.coroutines.delay(250)
                 val now = System.nanoTime()
                 val movedBytes = sent.get()
-                val total = TransferAccounting.countableBytes(movedBytes, acknowledged.get(), verifyUpload)
+                // Measure throughput as bytes written/read over actual elapsed time.
+                // Upload HTTP confirmations can lag behind outgoing bytes by server processing time.
+                val total = TransferAccounting.measuredBytes(movedBytes)
                 val interval = ((now - lastAt) / 1_000_000_000.0).coerceAtLeast(.001)
                 val instant = (total - lastBytes).coerceAtLeast(0L) * 8.0 / interval / 1_000_000.0
                 val needleMbps = gaugeRate.sample(now, movedBytes)
-                if (verifyUpload && total == lastBytes && movedBytes > lastMovedBytes) unacknowledgedIntervals++
+                if (verifyUpload && acknowledged.get() == 0L && movedBytes > lastMovedBytes) unacknowledgedIntervals++
                 longestSampleNanos = maxOf(longestSampleNanos, now - lastAt)
                 throughput.record(now, total)
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
@@ -1501,7 +1503,8 @@ private object SpeedEngine {
             probeWorker.cancelAndJoin()
             workers.forEach { it.join() }
             val end = System.nanoTime()
-            val total = TransferAccounting.countableBytes(sent.get(), acknowledged.get(), verifyUpload)
+            val total = TransferAccounting.measuredBytes(sent.get())
+            val confirmed = acknowledged.get()
             onLog("$label gauge: longest sample gap ${TimeUnit.NANOSECONDS.toMillis(longestSampleNanos)} ms, " +
                 "$unacknowledgedIntervals intervals with upload traffic awaiting acknowledgment")
             if (longestSampleNanos > TimeUnit.MILLISECONDS.toNanos(750)) {
@@ -1510,8 +1513,17 @@ private object SpeedEngine {
             if (verifyUpload && unacknowledgedIntervals >= 3) {
                 onLog("$label note: outgoing traffic is waiting for server confirmation; live needle is an estimate")
             }
-            if (total <= 0L) error(label + ": no server-accepted data; " +
-                (failures.get()?.javaClass?.simpleName ?: "no successful transfer"))
+            if (total <= 0L || (verifyUpload && !TransferAccounting.uploadHasServerConfirmation(confirmed))) {
+                error(label + ": no confirmed transfer; " +
+                    (failures.get()?.javaClass?.simpleName ?: "no successful server response"))
+            }
+            if (verifyUpload) {
+                onLog("$label upload throughput measured from bytes written; server confirmed " +
+                    "$confirmed / $total bytes before cutoff")
+                if (confirmed < total / 2) {
+                    onLog("$label note: many outgoing bytes were still awaiting confirmation at cutoff")
+                }
+            }
             throughput.record(end, total)
             val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
             val average = throughput.averageMbps()
