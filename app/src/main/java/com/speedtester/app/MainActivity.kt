@@ -461,7 +461,7 @@ private fun SpeedTesterApp(context: Context) {
                                 )
                                 if (testing && gaugeUpload) {
                                     Text(
-                                        "Needle: outgoing transfer estimate · Live rate: server-confirmed uploads",
+                                        "Upload needle and live speed: outgoing bytes · Server responses verified separately",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
