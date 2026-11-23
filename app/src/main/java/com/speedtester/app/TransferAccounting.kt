@@ -9,7 +9,10 @@ internal object TransferAccounting {
 
     fun measuredBytes(moved: Long): Long = moved.coerceAtLeast(0L)
 
-    fun uploadHasServerConfirmation(acknowledged: Long): Boolean = acknowledged > 0L
+    // Reject highly incomplete uploads rather than reporting an inflated speed on a failing server.
+    // Ordinary phase cutoffs leave only the last few in-flight requests unconfirmed.
+    fun uploadHasServerConfirmation(acknowledged: Long, measured: Long = acknowledged): Boolean =
+        acknowledged > 0L && acknowledged >= measured.coerceAtLeast(0L) / 2L
 
     fun loadedPing(down: Long, up: Long): Long =
         listOf(down, up).filter { it >= 0L }.maxOrNull() ?: -1L
