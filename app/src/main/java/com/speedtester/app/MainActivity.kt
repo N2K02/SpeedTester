@@ -787,7 +787,10 @@ private fun SpeedTesterApp(context: Context) {
                                     InfoRow("Access point (BSSID)", netInfo.bssid)
                                     InfoRow("Wi-Fi signal", netInfo.signal)
                                     InfoRow("Signal quality", netInfo.quality)
-                                    InfoRow("Link speed", netInfo.link)
+                                    InfoRow("Wi-Fi link speed (router)", netInfo.link)
+                                    Text("Wi-Fi link speed is not internet download speed. Test results measure throughput to the selected server.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     InfoRow("Frequency / band", netInfo.frequency)
                                     if (netInfo.ssid == "Unavailable") {
                                         Text("To display the network name, Android needs precise Location permission and enabled Location services.",
@@ -1500,7 +1503,13 @@ private object SpeedEngine {
                 lastAt = now
                 lastBytes = total
                 lastMovedBytes = movedBytes
-                if (workers.all { it.isCompleted }) break
+                // If every stream exhausted retries, a partial phase is not a valid speed test.
+                if (MeasurementReliability.allWorkersFailed(
+                        workers.count { it.isCompleted }, workers.size, transfers.stopped
+                    )) {
+                    error("$label: all transfer streams failed before the test finished; " +
+                        (failures.get()?.message ?: "retry on another server"))
+                }
             }
             transfers.stop()
             workers.forEach { it.cancel() }
@@ -1577,16 +1586,20 @@ private object SpeedEngine {
         val pings = mutableListOf<Long>()
         repeat(8) { index ->
             val started = System.nanoTime()
-            Socket().use { it.connect(probeAddress, 3000) }
-            val ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
-            pings.add(ms)
-            onLog("TCP latency probe " + (index + 1) + "/8: " + ms + "ms")
-            onMetrics(pings.average().toLong(), if (pings.size > 1) pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average() else 0.0)
-            publishProgress("Measuring latency", .02f + .06f * pings.size / 8f, 0f, null)
+            val result = runCatching {
+                Socket().use { it.connect(probeAddress, 1500) }
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            }
+            result.onSuccess { pings.add(it) }
+                .onFailure { onLog("TCP latency probe " + (index + 1) + "/8 failed: " + it.javaClass.simpleName) }
+            result.getOrNull()?.let { onLog("TCP latency probe " + (index + 1) + "/8: " + it + "ms") }
+            onMetrics(MeasurementReliability.idlePingMs(pings), MeasurementReliability.idleJitterMs(pings))
+            publishProgress("Measuring latency", .02f + .06f * (index + 1) / 8f, 0f, null)
             kotlinx.coroutines.delay(100)
         }
-        val ping = pings.average().toLong()
-        val jitter = pings.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
+        val ping = MeasurementReliability.idlePingMs(pings)
+        val jitter = MeasurementReliability.idleJitterMs(pings)
+        if (pings.isEmpty()) onLog("Idle TCP latency unavailable; HTTPS throughput test continues")
 
         // Ookla classic servers expose random-size JPEG payloads beside upload.php. Each stream
         // requests it again whenever it finishes, until the time is up.
