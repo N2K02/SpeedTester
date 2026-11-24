@@ -9,7 +9,7 @@ val appVersionCode = appVersion.split(".").let { it[0].toInt() * 10 + it[1].toIn
 
 android {
     namespace = "com.speedtester.app"
-    compileSdk = 37
+    compileSdk { version = release(37) { minorApiLevel = 2 } }
     defaultConfig {
         applicationId = "com.speedtester.app"
         minSdk = 26
@@ -39,7 +39,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.compose.ui:ui:1.7.8")
     implementation("androidx.compose.ui:ui-tooling-preview:1.7.8")
-    implementation("androidx.compose.material3:material3:1.3.2")
+    implementation("androidx.compose.material3:material3:1.6.0-alpha01")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.room:room-runtime:2.8.5")
@@ -57,8 +57,8 @@ dependencies {
 }
 
 dependencies {
-    implementation("dev.n2k02:theme:0.1.14")
-        implementation("dev.n2k02:updater:0.1.36")
+    implementation("dev.n2k02:theme:0.1.15")
+        implementation("dev.n2k02:updater:0.1.39")
 }
 
  
