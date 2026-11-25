@@ -24,7 +24,7 @@ concurrency:
 
 env:
   APP: SpeedTester
-  BUILD_COMMIT: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+  BUILD_COMMIT: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
 
 jobs:
   build:
@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-java@v6
@@ -50,8 +50,8 @@ jobs:
       - name: Configure APK build channel
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            echo "BUILD_VARIANT=Debug" >> "$GITHUB_ENV"
-            echo "APK_INPUT=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+            echo "BUILD_VARIANT=Release" >> "$GITHUB_ENV"
+            echo "APK_INPUT=app/build/outputs/apk/release/app-release-unsigned.apk" >> "$GITHUB_ENV"
           else
             echo "BUILD_VARIANT=Release" >> "$GITHUB_ENV"
             echo "APK_INPUT=app/build/outputs/apk/release/app-release-unsigned.apk" >> "$GITHUB_ENV"
@@ -124,7 +124,7 @@ jobs:
           python3 .github/scripts/experimental_naming.py --self-test
           python3 .github/scripts/experimental_naming.py "$GITHUB_REPOSITORY" "$APP" "$GITHUB_RUN_NUMBER" "$PR_NUMBER"
       - name: Compile and test
-        run: gradle --no-daemon testDebugUnitTest assembleDebug assembleRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
+        run: gradle --no-daemon testDebugUnitTest assembleDebug assembleRelease lintDebug lintRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
       - name: Build channel APK
         run: gradle --no-daemon assemble$BUILD_VARIANT -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
