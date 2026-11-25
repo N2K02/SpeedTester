@@ -1020,7 +1020,9 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val captivePortal = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
     val cell = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
     val carrier = runCatching { cell.networkOperatorName }.getOrDefault("").ifBlank { "Unknown carrier" }
-    val cellularSignal = runCatching { cell.signalStrength?.level?.let { "Signal level $it/4" } ?: "Signal unavailable" }.getOrDefault("Signal restricted by Android")
+    val cellularSignal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        runCatching { cell.signalStrength?.level?.let { "Signal level $it/4" } ?: "Signal unavailable" }.getOrDefault("Signal restricted by Android")
+    } else "Signal unavailable on this Android version"
     val cellularType = runCatching {
         when (cell.dataNetworkType) {
             android.telephony.TelephonyManager.NETWORK_TYPE_LTE -> "LTE (4G)"
