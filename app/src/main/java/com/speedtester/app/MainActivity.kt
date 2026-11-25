@@ -1011,7 +1011,10 @@ private fun readNetworkInfo(context: Context): NetworkInfo {
     val caps = cm.getNetworkCapabilities(cm.activeNetwork)
     val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
     // Prefer the active network's WifiInfo on modern Android; fall back for older releases.
-    val info = (caps?.transportInfo as? android.net.wifi.WifiInfo) ?: runCatching { wifi.connectionInfo }.getOrNull()
+    val transportInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        caps?.transportInfo as? android.net.wifi.WifiInfo
+    } else null
+    val info = transportInfo ?: runCatching { wifi.connectionInfo }.getOrNull()
     val wifiAssociated = runCatching { wifi.connectionInfo?.networkId ?: -1 }.getOrDefault(-1) >= 0
     val validated = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
     val captivePortal = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
