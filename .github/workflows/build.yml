@@ -126,6 +126,11 @@ jobs:
       - name: Compile and test
         run: gradle --no-daemon testDebugUnitTest assembleDebug assembleRelease lintDebug lintRelease -PappVersion="$VERSION" -PappVersionCode="$VERSION_CODE" -PappVersionSuffix="$VERSION_SUFFIX"
 
+      - name: Print full lint text reports
+        if: failure()
+        run: |
+          find app/build/intermediates/lint_intermediate_text_report -name 'lint-results-*.txt' -type f -exec cat {} +
+
       - name: Preserve lint diagnostics
         if: always()
         uses: actions/upload-artifact@v7
