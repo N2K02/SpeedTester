@@ -29,6 +29,17 @@ internal object StreamScaling {
     }
 
     /**
+     * Whether scaling should stop after this check. An interval with no traffic yet (TLS setup,
+     * lumpy upload acknowledgements) is not evidence of a plateau, so keep checking until the
+     * deadline instead of freezing at the initial stream count.
+     */
+    fun settled(currentStreams: Int, elapsedMs: Long, latestMbps: Double, added: Int): Boolean {
+        if (added > 0) return false
+        if (currentStreams >= MAX || elapsedMs > SCALING_DEADLINE_MS) return true
+        return latestMbps.isFinite() && latestMbps > 0.0
+    }
+
+    /**
      * When the headline (post ramp-up) window starts: after scaling stops, but never earlier than
      * [minWarmupMs] and never so late that fewer than [minMeasureMs] remain in the phase.
      */

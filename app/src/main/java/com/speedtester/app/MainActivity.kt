@@ -1462,7 +1462,8 @@ private object SpeedEngine {
             })
         (1..STREAMS).forEach(::launchWorker)
         val probeWorker = launch(Dispatchers.IO) {
-            repeat(7) {
+            // Sample loaded latency across the whole phase, not only the ramp-up.
+            while (!transfers.stopped) {
                 kotlinx.coroutines.delay(350)
                 if (transfers.stopped) return@launch
                 val socket = Socket()
@@ -1496,7 +1497,8 @@ private object SpeedEngine {
             var warmupAt = 0L
             var scalingSettled = false
             var lastCheckAt = start
-            var lastCheckBytes = 0L
+            var lastCheckMoved = 0L
+            var lastIncreaseAt = start
             var previousCheckMbps: Double? = null
             val windowPoints = mutableListOf<ThroughputReport.Point>()
             while (System.nanoTime() - start < duration) {
@@ -1511,20 +1513,21 @@ private object SpeedEngine {
                 longestSampleNanos = maxOf(longestSampleNanos, now - lastAt)
                 val elapsedMs = TimeUnit.NANOSECONDS.toMillis(now - start)
                 if (!scalingSettled && now - lastCheckAt >= TimeUnit.MILLISECONDS.toNanos(StreamScaling.CHECK_INTERVAL_MS)) {
-                    val checkMbps = (total - lastCheckBytes).coerceAtLeast(0L) * 8_000.0 / (now - lastCheckAt)
+                    // Bytes moved (not lumpy upload acknowledgements) show whether more streams help.
+                    val checkMbps = (movedBytes - lastCheckMoved).coerceAtLeast(0L) * 8_000.0 / (now - lastCheckAt)
                     val add = StreamScaling.streamsToAdd(workers.size, elapsedMs, previousCheckMbps, checkMbps)
                     if (add > 0) {
                         val first = workers.size + 1
                         (first until first + add).forEach(::launchWorker)
                         onLog("$label: " + workers.size + " parallel connections (rate still rising: " +
                             "%.1f".format(java.util.Locale.US, checkMbps) + " Mbps)")
-                    } else {
+                    } else if (StreamScaling.settled(workers.size, elapsedMs, checkMbps, add)) {
                         scalingSettled = true
                         onLog("$label: settled at " + workers.size + " parallel connections after " + elapsedMs + " ms")
                     }
-                    previousCheckMbps = checkMbps
+                    if (checkMbps > 0.0) previousCheckMbps = checkMbps
                     lastCheckAt = now
-                    lastCheckBytes = total
+                    lastCheckMoved = movedBytes
                 }
                 if (warmupBytes < 0 && StreamScaling.warmupReached(elapsedMs, scalingSettled, WARMUP_MS,
                         TimeUnit.SECONDS.toMillis(TEST_SECONDS), MIN_MEASURE_MS)) {
@@ -1532,6 +1535,7 @@ private object SpeedEngine {
                     warmupAt = now
                 }
                 peak = maxOf(peak, instant)
+                if (total > lastBytes) lastIncreaseAt = now
                 if (warmupBytes >= 0L) windowPoints.add(ThroughputReport.Point(now, total))
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
                 onUpdate(label, from + (to - from) * fraction, ThroughputReport.lineRate(instant).toFloat(),
@@ -1565,14 +1569,18 @@ private object SpeedEngine {
                 (failures.get()?.javaClass?.simpleName ?: "no successful transfer"))
             val seconds = ((end - start) / 1_000_000_000.0).coerceAtLeast(.001)
             val average = total * 8.0 / seconds / 1_000_000.0
-            val steady = if (warmupBytes >= 0L && end > warmupAt)
+            // Upload requests still in flight at the deadline are cancelled and never confirmed;
+            // end the upload rate at the last confirmation so their time isn't counted as idle.
+            val rateEnd = if (verifyUpload && lastIncreaseAt > warmupAt) lastIncreaseAt else end
+            val steady = if (warmupBytes >= 0L && rateEnd > warmupAt)
                 (total - warmupBytes).coerceAtLeast(0L) * 8.0 /
-                    ((end - warmupAt) / 1_000_000_000.0) / 1_000_000.0
+                    ((rateEnd - warmupAt) / 1_000_000_000.0) / 1_000_000.0
                 else average
             val samples = synchronized(latency) { latency.toList() }
             onLog(label + " concurrent loaded latency probes: " + samples.size + "/" + probeAttempts.get())
             if (samples.isEmpty()) onLog("$label warning: loaded latency unavailable; no successful TCP probes")
-            windowPoints.add(ThroughputReport.Point(end, total))
+            // A cancelled upload tail would add an artificial idle window.
+            if (!verifyUpload) windowPoints.add(ThroughputReport.Point(end, total))
             // Headline: Ookla-style trimmed window rate converted to line rate. The classic
             // post-ramp-up payload rate is kept as "data throughput".
             val trimmed = ThroughputReport.trimmedMbps(windowPoints) ?: steady

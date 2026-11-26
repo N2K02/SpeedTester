@@ -30,6 +30,26 @@ class StreamScalingTest {
         assertEquals(0, StreamScaling.streamsToAdd(4, 1_000, null, Double.NaN))
     }
 
+    @Test fun quietIntervalDoesNotFreezeScalingEarly() {
+        // Upload acknowledgements can be absent for a second: keep checking.
+        assertFalse(StreamScaling.settled(4, 1_000, 0.0, 0))
+        // A genuine plateau settles.
+        assertTrue(StreamScaling.settled(8, 2_000, 40.0, 0))
+        // Deadline or maximum always settles, and adding streams never does.
+        assertTrue(StreamScaling.settled(4, StreamScaling.SCALING_DEADLINE_MS + 1, 0.0, 0))
+        assertTrue(StreamScaling.settled(StreamScaling.MAX, 2_000, 0.0, 0))
+        assertFalse(StreamScaling.settled(4, 1_000, 30.0, 4))
+    }
+
+    @Test fun engineScalesOnMovedBytesAndSamplesLatencyAllPhase() {
+        val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
+        val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
+        assertTrue(engine.contains("(movedBytes - lastCheckMoved).coerceAtLeast(0L)"))
+        assertTrue(engine.contains("StreamScaling.settled(workers.size, elapsedMs, checkMbps, add)"))
+        assertTrue(engine.contains("if (verifyUpload && lastIncreaseAt > warmupAt) lastIncreaseAt else end"))
+        assertFalse(engine.contains("repeat(7)"))
+    }
+
     @Test fun warmupWaitsForScalingButKeepsMeasurementWindow() {
         // Before the minimum warm-up nothing counts, even if settled.
         assertFalse(StreamScaling.warmupReached(1_500, true, 2_000, 12_000, 6_000))
