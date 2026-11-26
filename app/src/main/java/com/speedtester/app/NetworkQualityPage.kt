@@ -51,6 +51,7 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /** A single, manual-only test page. Leaving the page disposes the scope and stops the test. */
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 @Composable
 fun NetworkQualityPage(context: Context, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()

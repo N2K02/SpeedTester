@@ -65,6 +65,8 @@ internal fun SpeedTestHistoryTabbedScreen(
 
 @Composable
 private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Modifier) {
+    // Observable locale so dates re-format when the system language changes.
+    val historyLocale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     var results by remember(context) { mutableStateOf(NetworkQualityHistory.load(context)) }
     var transportFilter by rememberSaveable { mutableStateOf("All networks") }
     // Returning from Quality should reveal its new result without reopening History.
@@ -143,7 +145,7 @@ private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Mod
                         horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                SimpleDateFormat("dd MMM yyyy · HH:mm", Locale.getDefault())
+                                SimpleDateFormat("dd MMM yyyy · HH:mm", historyLocale)
                                     .format(Date(item.timestamp)),
                                 style = MaterialTheme.typography.titleSmall)
                             Text("${item.transport} · ${item.profile.lowercase().replaceFirstChar { it.uppercase() }}",
