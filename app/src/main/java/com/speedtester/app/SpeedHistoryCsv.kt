@@ -7,7 +7,8 @@ internal object SpeedHistoryCsv {
         "upload_average_mbps", "upload_peak_mbps", "tcp_ping_ms", "jitter_ms", "loaded_tcp_ping_ms",
         "loaded_jitter_ms", "failed_tcp_probes", "total_tcp_probes", "server", "network_type",
         "internet_available", "wifi_signal", "wifi_quality", "wifi_link_speed", "wifi_frequency",
-        "connection_note", "discovery_status", "discovery_ms", "wifi_ssid", "wifi_bssid"
+        "connection_note", "discovery_status", "discovery_ms", "wifi_ssid", "wifi_bssid",
+        "download_data_mbps", "upload_data_mbps"
     )
     private fun field(value: String): String {
         // Spreadsheet software can treat an untrusted SSID/server name as a formula.
@@ -27,7 +28,8 @@ internal object SpeedHistoryCsv {
                 field(item.server), field(item.networkType), item.internetAvailable.toString(),
                 field(item.wifiSignal), field(item.wifiQuality), field(item.wifiLink),
                 field(item.wifiFrequency), field(item.connectionNote), field(item.discoveryStatus),
-                item.discoveryMs.toString(), field(item.wifiSsid), field(item.wifiBssid)
+                item.discoveryMs.toString(), field(item.wifiSsid), field(item.wifiBssid),
+                item.downloadData.toString(), item.uploadData.toString()
             ).joinToString(",")).append("\r\n")
         }
     }

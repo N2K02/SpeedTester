@@ -61,6 +61,13 @@ class ThroughputReportTest {
         assertEquals(0.0, legacy.downloadData, 0.0)
     }
 
+    @Test fun csvExportsDataThroughput() {
+        val csv = SpeedHistoryCsv.export(listOf(TestResult("d", 101.0, 40.0, 5, 1.0, "s", downloadData = 87.0, uploadData = 34.5)))
+        val lines = csv.split("\r\n").filter { it.isNotEmpty() }
+        assertTrue(lines[0].endsWith("download_data_mbps,upload_data_mbps"))
+        assertTrue(lines[1].endsWith(",87.0,34.5"))
+    }
+
     @Test fun engineReportsTrimmedLineRateAndKeepsClassicDataRate() {
         val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
         val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
