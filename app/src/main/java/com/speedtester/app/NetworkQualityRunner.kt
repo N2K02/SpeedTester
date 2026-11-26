@@ -57,7 +57,8 @@ object NetworkQualityRunner {
             network != null -> "Other network"
             else -> "Disconnected"
         }
-        val details = if (wifi) (caps?.transportInfo as? WifiInfo)
+        val transportWifi = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) caps?.transportInfo as? WifiInfo else null
+        val details = if (wifi) transportWifi
             ?: (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager)?.connectionInfo
             else null
         val signal = details?.rssi?.takeIf { it in -110..-1 }
@@ -75,6 +76,7 @@ object NetworkQualityRunner {
         access(app, network)
     }
 
+    @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
     suspend fun run(
         context: Context,
         profile: QualityProfile,

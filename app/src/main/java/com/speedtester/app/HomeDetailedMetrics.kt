@@ -28,6 +28,8 @@ internal data class HomeMetricsSnapshot(
     val downloadPeak: Double?,
     val uploadAverage: Double?,
     val uploadPeak: Double?,
+    val downloadData: Double? = null,
+    val uploadData: Double? = null,
     val loadedPing: Long,
     val loadedJitter: Double?,
     val network: String,
@@ -63,7 +65,8 @@ private fun SpeedMetricTile(
     average: Double?,
     peak: Double?,
     accent: Color,
-    modifier: Modifier
+    modifier: Modifier,
+    data: Double? = null
 ) {
     Card(
         modifier = modifier,
@@ -94,6 +97,10 @@ private fun SpeedMetricTile(
             Text("Peak  " + HomeMetricsFormatting.speed(peak) + " Mbps",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface)
+            // Payload only (no protocol overhead): what a large file download actually achieves.
+            if (data != null) Text("Data throughput  " + HomeMetricsFormatting.speed(data) + " Mbps",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -163,9 +170,9 @@ internal fun HomeDetailedMetrics(
             if (expanded) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     SpeedMetricTile("↓ Download", metrics.download, metrics.downloadAverage,
-                        metrics.downloadPeak, downloadBlue, Modifier.weight(1f))
+                        metrics.downloadPeak, downloadBlue, Modifier.weight(1f), metrics.downloadData)
                     SpeedMetricTile("↑ Upload", metrics.upload, metrics.uploadAverage,
-                        metrics.uploadPeak, uploadPurple, Modifier.weight(1f))
+                        metrics.uploadPeak, uploadPurple, Modifier.weight(1f), metrics.uploadData)
                 }
 
                 HomeDetailGroup("Connection", {

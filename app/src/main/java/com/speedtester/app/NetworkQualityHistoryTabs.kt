@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -64,7 +65,21 @@ internal fun SpeedTestHistoryTabbedScreen(
 
 @Composable
 private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Modifier) {
+    // Observable locale so dates re-format when the system language changes.
+    val historyLocale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     var results by remember(context) { mutableStateOf(NetworkQualityHistory.load(context)) }
+    var transportFilter by rememberSaveable { mutableStateOf("All networks") }
+    // Returning from Quality should reveal its new result without reopening History.
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        results = NetworkQualityHistory.load(context)
+    }
+    val transports = remember(results) {
+        listOf("All networks") + results.map { it.transport }.distinct().sorted()
+    }
+    val filtered = remember(results, transportFilter) {
+        if (transportFilter == "All networks") results else
+            results.filter { it.transport == transportFilter }
+    }
     var expanded by remember { mutableStateOf<Long?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<Long?>(null) }
@@ -87,6 +102,22 @@ private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Mod
                 }
             }
         }
+        if (results.isNotEmpty()) item {
+            androidx.compose.foundation.lazy.LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                items(transports) { transport ->
+                    FilterChip(
+                        selected = transportFilter == transport,
+                        onClick = { transportFilter = transport },
+                        label = { Text(transport) }
+                    )
+                }
+            }
+            Text("${filtered.size} of ${results.size} quality results",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (results.isEmpty()) item {
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(24.dp),
@@ -101,7 +132,10 @@ private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Mod
                 }
             }
         }
-        items(results, key = { it.timestamp }) { item ->
+        if (results.isNotEmpty() && filtered.isEmpty()) item {
+            Text("No results for this network type.", style = MaterialTheme.typography.bodyMedium)
+        }
+        items(filtered, key = { it.timestamp }) { item ->
             ElevatedCard(
                 onClick = { expanded = if (expanded == item.timestamp) null else item.timestamp },
                 modifier = Modifier.fillMaxWidth()
@@ -111,7 +145,7 @@ private fun NetworkQualityHistoryPage(context: Context, modifier: Modifier = Mod
                         horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                SimpleDateFormat("dd MMM yyyy · HH:mm", Locale.getDefault())
+                                SimpleDateFormat("dd MMM yyyy · HH:mm", historyLocale)
                                     .format(Date(item.timestamp)),
                                 style = MaterialTheme.typography.titleSmall)
                             Text("${item.transport} · ${item.profile.lowercase().replaceFirstChar { it.uppercase() }}",

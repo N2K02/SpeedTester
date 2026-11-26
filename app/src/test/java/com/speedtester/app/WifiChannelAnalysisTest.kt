@@ -24,6 +24,25 @@ class WifiChannelAnalysisTest {
         assertEquals(11, best?.channel)
         assertEquals(0.0, best!!.congestion, 0.001)
     }
+    @Test fun channelOverlapUsesRealMegahertzRatherThanChannelNumbers() {
+        // In 5 GHz, channels 36 and 40 are 20 MHz apart, so two 20 MHz
+        // channels should not be mistaken for overlapping frequencies.
+        val neighbouring = listOf(ap(5180, -35, 20))
+        val onChannel = WifiChannelAnalysis.rating(36, WifiBand.FIVE, neighbouring)
+        val adjacent = WifiChannelAnalysis.rating(40, WifiBand.FIVE, neighbouring)
+        assertTrue(onChannel.congestion > 0.0)
+        assertEquals(0.0, adjacent.congestion, 0.00001)
+        assertEquals(0, adjacent.affectedNetworks)
+    }
+
+    @Test fun wideChannelsCreateMeasuredOverlapAcrossBands() {
+        assertTrue(WifiChannelAnalysis.rating(44, WifiBand.FIVE,
+            listOf(ap(5180, -40, 80))).congestion > 0.0)
+        assertEquals(5975, WifiChannelAnalysis.centerFrequencyMhz(5, WifiBand.SIX))
+        assertEquals(2412, WifiChannelAnalysis.centerFrequencyMhz(1, WifiBand.TWO_FOUR))
+        assertEquals(2484, WifiChannelAnalysis.centerFrequencyMhz(14, WifiBand.TWO_FOUR))
+    }
+
     @Test fun strongerSignalsIncreaseCongestion() {
         val strong = WifiChannelAnalysis.rating(1, WifiBand.TWO_FOUR, listOf(ap(2412, -35)))
         val weak = WifiChannelAnalysis.rating(1, WifiBand.TWO_FOUR, listOf(ap(2412, -85)))

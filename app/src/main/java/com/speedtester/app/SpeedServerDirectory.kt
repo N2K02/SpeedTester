@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -123,8 +124,16 @@ internal fun SpeedServerDirectory(
     onSelect: (NdtServerCandidate) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var search by remember { mutableStateOf("") }
-    var sortMode by remember { mutableStateOf(ServerSortMode.LOWEST_TCP_PING) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val preferences = remember(context) {
+        context.getSharedPreferences("speedtester_server_preferences", android.content.Context.MODE_PRIVATE)
+    }
+    var search by rememberSaveable { mutableStateOf("") }
+    var sortMode by remember {
+        val saved = preferences.getString("server_sort", null)
+        mutableStateOf(ServerSortMode.entries.firstOrNull { it.name == saved }
+            ?: ServerSortMode.LOWEST_TCP_PING)
+    }
     val matched = remember(servers, search, sortMode) {
         ServerDirectoryLogic.visible(servers, search, sortMode)
     }
@@ -159,7 +168,7 @@ internal fun SpeedServerDirectory(
                             Text("Refresh")
                         }
                     }
-                    Text("Choose a server for your next test. Distances are approximate and TCP latency is measured separately.",
+                    Text("Choose a server for your next test. Distances are approximate; unavailable TCP latency is not a speed measurement.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -180,7 +189,10 @@ internal fun SpeedServerDirectory(
                 ServerSortMode.entries.forEach { mode ->
                     FilterChip(
                         selected = sortMode == mode,
-                        onClick = { sortMode = mode },
+                        onClick = {
+                            sortMode = mode
+                            preferences.edit().putString("server_sort", mode.name).apply()
+                        },
                         label = { Text(mode.label) },
                         leadingIcon = {
                             Icon(when (mode) {
@@ -199,7 +211,7 @@ internal fun SpeedServerDirectory(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall)
                 if (sortMode == ServerSortMode.RECOMMENDED) {
-                    Text("Recommended combines observed TCP ping and approximate distance.",
+                    Text("Recommended is an estimate from TCP ping and distance, not a throughput or server-capacity benchmark.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
