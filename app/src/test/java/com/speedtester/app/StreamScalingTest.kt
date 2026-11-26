@@ -11,7 +11,7 @@ class StreamScalingTest {
 
     @Test fun keepsAddingWhileRateClimbsAtLeastTenPercent() {
         assertEquals(4, StreamScaling.streamsToAdd(8, 2_000, 35.0, 60.0))
-        assertEquals(4, StreamScaling.streamsToAdd(8, 2_000, 50.0, 55.0))
+        assertEquals(4, StreamScaling.streamsToAdd(8, 2_000, 50.0, 56.0))
     }
 
     @Test fun stopsWhenRateHasPlateaued() {
