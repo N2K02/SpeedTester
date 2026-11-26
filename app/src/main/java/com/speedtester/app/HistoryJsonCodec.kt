@@ -23,7 +23,8 @@ internal object HistoryJsonCodec {
                 o.optString("wifiLink", "—"), o.optString("wifiFrequency", "—"),
                 o.optString("connectionNote", ""),
                 o.optString("discoveryStatus", "Not recorded"), o.optLong("discoveryMs", -1),
-                o.optString("wifiSsid", "Unavailable"), o.optString("wifiBssid", "Unavailable")
+                o.optString("wifiSsid", "Unavailable"), o.optString("wifiBssid", "Unavailable"),
+                o.optDouble("downloadData", 0.0).safe(), o.optDouble("uploadData", 0.0).safe()
             )
         }
     }
@@ -35,6 +36,7 @@ internal object HistoryJsonCodec {
                 .put("ping", x.ping).put("jitter", x.jitter.safe()).put("server", x.server)
                 .put("downloadAverage", x.downloadAverage.safe()).put("downloadPeak", x.downloadPeak.safe())
                 .put("uploadAverage", x.uploadAverage.safe()).put("uploadPeak", x.uploadPeak.safe())
+                .put("downloadData", x.downloadData.safe()).put("uploadData", x.uploadData.safe())
                 .put("loadedPing", x.loadedPing).put("loadedJitter", x.loadedJitter.safe())
                 .put("failedProbes", x.failedProbes).put("probeCount", x.probeCount)
                 .put("networkType", x.networkType).put("internetAvailable", x.internetAvailable)

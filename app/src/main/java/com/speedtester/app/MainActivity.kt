@@ -103,7 +103,7 @@ private fun formatHistoryDate(raw: String): String {
     }
 }
 
-data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0, val networkType: String = "Unknown", val internetAvailable: Boolean = false, val wifiSignal: String = "—", val wifiQuality: String = "—", val wifiLink: String = "—", val wifiFrequency: String = "—", val connectionNote: String = "", val discoveryStatus: String = "Not recorded", val discoveryMs: Long = -1L, val wifiSsid: String = "Unavailable", val wifiBssid: String = "Unavailable")
+data class TestResult(val date: String, val download: Double, val upload: Double, val ping: Long, val jitter: Double, val server: String, val downloadAverage: Double = 0.0, val downloadPeak: Double = 0.0, val uploadAverage: Double = 0.0, val uploadPeak: Double = 0.0, val loadedPing: Long = -1L, val loadedJitter: Double = 0.0, val failedProbes: Int = 0, val probeCount: Int = 0, val networkType: String = "Unknown", val internetAvailable: Boolean = false, val wifiSignal: String = "—", val wifiQuality: String = "—", val wifiLink: String = "—", val wifiFrequency: String = "—", val connectionNote: String = "", val discoveryStatus: String = "Not recorded", val discoveryMs: Long = -1L, val wifiSsid: String = "Unavailable", val wifiBssid: String = "Unavailable", val downloadData: Double = 0.0, val uploadData: Double = 0.0)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); LiveUpdater.init(this); AppLog.init(applicationContext); setContent { SpeedTesterApp(this) } }
@@ -615,7 +615,7 @@ private fun SpeedTesterApp(context: Context) {
                                                     logDiagnostic("NETWORK_CHANGED_DURING_TEST — discarding mixed-network result")
                                                     return@launch
                                                 }
-                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(candidate?.host.orEmpty(), candidate?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid)
+                                                val saved = TestResult(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date()), download, upload, ping, jitter, listOf(candidate?.host.orEmpty(), candidate?.city.orEmpty()).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { endpoint }, downloadAverage, downloadPeak, uploadAverage, uploadPeak, loadedPing, loadedJitter, failedProbes, probeCount, testNetworkAtStart.type, testNetworkAtStart.connected, testNetworkAtStart.signal, testNetworkAtStart.quality, testNetworkAtStart.link, testNetworkAtStart.frequency, testNetworkAtStart.note, serverDiscoveryStatus, serverDiscoveryMs, testNetworkAtStart.ssid, testNetworkAtStart.bssid, result.downloadData, result.uploadData)
                                                 if (!persistHistory { (listOf(saved) + it).take(100) }) {
                                                     status = "Test complete — history not saved"
                                                     return@launch
@@ -660,6 +660,8 @@ private fun SpeedTesterApp(context: Context) {
                             downloadPeak = if (testing) downloadPeak else previous?.downloadPeak,
                             uploadAverage = if (testing) uploadAverage else previous?.uploadAverage,
                             uploadPeak = if (testing) uploadPeak else previous?.uploadPeak,
+                            downloadData = if (testing) null else previous?.downloadData?.takeIf { it > 0.0 },
+                            uploadData = if (testing) null else previous?.uploadData?.takeIf { it > 0.0 },
                             loadedPing = if (testing) loadedPing else previous?.loadedPing ?: loadedPing,
                             loadedJitter = if (testing) loadedJitter else previous?.loadedJitter,
                             network = netInfo.type,
@@ -995,8 +997,8 @@ private fun InfoRow(label: String, value: String) {
 private fun shareTestResult(context: Context, item: TestResult) {
     val shareText = buildString {
         append("SpeedTester result · ").append(item.date).append("\n")
-        append("Download: %.1f Mbps (avg %.1f, peak %.1f)\n".format(item.download, item.downloadAverage, item.downloadPeak))
-        append("Upload: %.1f Mbps (avg %.1f, peak %.1f)\n".format(item.upload, item.uploadAverage, item.uploadPeak))
+        append("Download: %.1f Mbps (avg %.1f, peak %.1f, data %.1f)\n".format(item.download, item.downloadAverage, item.downloadPeak, item.downloadData))
+        append("Upload: %.1f Mbps (avg %.1f, peak %.1f, data %.1f)\n".format(item.upload, item.uploadAverage, item.uploadPeak, item.uploadData))
         append("Idle TCP latency: ").append(item.ping).append(" ms · jitter %.1f ms\n".format(item.jitter))
         append("Loaded TCP latency: ").append(if (item.loadedPing >= 0) "${item.loadedPing} ms" else "unavailable").append(" · jitter %.1f ms\n".format(item.loadedJitter))
         append("Connection probes failed: ").append(item.failedProbes).append("/").append(item.probeCount).append("\n")
@@ -1260,7 +1262,7 @@ private data class NdtTcpInfo(
 ) {
     val retransmissionPercent: Double? get() = if ((bytesSent ?: 0L) > 0L && bytesRetrans != null) bytesRetrans!!.toDouble() * 100.0 / bytesSent!! else null
 }
-private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int, val downloadTcp: NdtTcpInfo?, val uploadTcp: NdtTcpInfo?, val serverIp: String, val dnsLookupMs: Long)
+private data class SpeedOutcome(val download: Double, val upload: Double, val ping: Long, val jitter: Double, val downloadAverage: Double, val downloadPeak: Double, val uploadAverage: Double, val uploadPeak: Double, val loadedPing: Long, val loadedJitter: Double, val failedProbes: Int, val probeCount: Int, val downloadTcp: NdtTcpInfo?, val uploadTcp: NdtTcpInfo?, val serverIp: String, val dnsLookupMs: Long, val downloadData: Double = 0.0, val uploadData: Double = 0.0)
 private data class NdtMeasurement(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val elapsedSeconds: Double, val tcpInfo: NdtTcpInfo?)
 private data class QualityAssessment(val score: Int, val label: String, val detail: String)
 private fun assessQuality(download: Double, upload: Double, ping: Long, jitter: Double, loadedPing: Long, failed: Int, probes: Int): QualityAssessment {
@@ -1415,7 +1417,7 @@ private object SpeedEngine {
     }
 
     /** Result of one direction: headline (after ramp-up), whole-phase average, peak, bytes and seconds. */
-    private data class Phase(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val seconds: Double, val latency: List<Long>, val failedProbes: Int, val attemptedProbes: Int) {
+    private data class Phase(val mbps: Double, val averageMbps: Double, val peakMbps: Double, val bytes: Long, val seconds: Double, val latency: List<Long>, val failedProbes: Int, val attemptedProbes: Int, val dataMbps: Double) {
         val loadedPing: Long get() = latency.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: -1L
         val loadedJitter: Double get() = if (latency.size < 2) 0.0 else latency.zipWithNext { a, b -> kotlin.math.abs(a - b).toDouble() }.average()
     }
@@ -1496,6 +1498,7 @@ private object SpeedEngine {
             var lastCheckAt = start
             var lastCheckBytes = 0L
             var previousCheckMbps: Double? = null
+            val windowPoints = mutableListOf<ThroughputReport.Point>()
             while (System.nanoTime() - start < duration) {
                 kotlinx.coroutines.delay(250)
                 val now = System.nanoTime()
@@ -1529,8 +1532,10 @@ private object SpeedEngine {
                     warmupAt = now
                 }
                 peak = maxOf(peak, instant)
+                if (warmupBytes >= 0L) windowPoints.add(ThroughputReport.Point(now, total))
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
-                onUpdate(label, from + (to - from) * fraction, instant.toFloat(), needleMbps)
+                onUpdate(label, from + (to - from) * fraction, ThroughputReport.lineRate(instant).toFloat(),
+                    ThroughputReport.lineRate(needleMbps.toDouble()).toFloat())
                 lastAt = now
                 lastBytes = total
                 lastMovedBytes = movedBytes
@@ -1567,8 +1572,17 @@ private object SpeedEngine {
             val samples = synchronized(latency) { latency.toList() }
             onLog(label + " concurrent loaded latency probes: " + samples.size + "/" + probeAttempts.get())
             if (samples.isEmpty()) onLog("$label warning: loaded latency unavailable; no successful TCP probes")
-            Phase(steady, average, maxOf(peak, steady), total, seconds,
-                samples, probeFailures.get(), probeAttempts.get())
+            windowPoints.add(ThroughputReport.Point(end, total))
+            // Headline: Ookla-style trimmed window rate converted to line rate. The classic
+            // post-ramp-up payload rate is kept as "data throughput".
+            val trimmed = ThroughputReport.trimmedMbps(windowPoints) ?: steady
+            val headline = ThroughputReport.lineRate(trimmed)
+            onLog(label + " result: data throughput " + "%.2f".format(java.util.Locale.US, steady) +
+                " Mbps, trimmed " + "%.2f".format(java.util.Locale.US, trimmed) +
+                " Mbps, line rate (x" + "%.3f".format(java.util.Locale.US, ThroughputReport.OVERHEAD_FACTOR) + ") " +
+                "%.2f".format(java.util.Locale.US, headline) + " Mbps")
+            Phase(headline, ThroughputReport.lineRate(average), ThroughputReport.lineRate(maxOf(peak, trimmed)), total, seconds,
+                samples, probeFailures.get(), probeAttempts.get(), steady)
         } finally {
             transfers.stop()
             workers.forEach { it.cancel() }
@@ -1699,6 +1713,6 @@ private object SpeedEngine {
             up.loadedPing + " ms; combined worst=" + loadedPing + " ms")
         onLog("Ookla-compatible server: " + server.host + " (" + locationName + ")")
         publishProgress("Complete", 1f, 0f, null)
-        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, totalProbes, null, null, resolvedAddress, dnsLookupMs)
+        SpeedOutcome(down.mbps, up.mbps, ping, jitter, down.averageMbps, down.peakMbps, up.averageMbps, up.peakMbps, loadedPing, loadedJitter, failed, totalProbes, null, null, resolvedAddress, dnsLookupMs, down.dataMbps, up.dataMbps)
     }
 }
