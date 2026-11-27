@@ -27,3 +27,4 @@ jobs:
         with:
           name: SpeedTester-experimental-shared-libraries
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7

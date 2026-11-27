@@ -136,6 +136,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: lint-diagnostics
+          retention-days: 7
           path: |
             app/build/reports/lint-results-*
             app/build/intermediates/lint_intermediate_text_report/**/lint-results-*.txt
