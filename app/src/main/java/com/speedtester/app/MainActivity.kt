@@ -1425,13 +1425,9 @@ private object SpeedEngine {
 
     /**
      * Runs [STREAMS] transfers in parallel for [TEST_SECONDS], reporting the combined rate about every
-     * 250 ms. [transfer] performs one cancellable request and adds to the counter as bytes move.
-     * Upload throughput uses payload bytes written, with server confirmation required for validity.
+     * 250 ms. [transfer] performs one cancellable request, returning false for a handled size probe.
+     * Only successful requests count toward worker health; uploads also track server-accepted bytes.
      */
-    private class WorkerState {
-        var uploadBytes = TransferTuning.MIN_UPLOAD_BYTES
-    }
-
     private suspend fun runPhase(
         label: String, from: Float, to: Float, probeAddress: java.net.InetSocketAddress, verifyUpload: Boolean,
         onUpdate: (String, Float, Float, Float?) -> Unit, onLog: (String) -> Unit,
@@ -1439,9 +1435,9 @@ private object SpeedEngine {
             transfers: PhaseTransfers,
             moved: java.util.concurrent.atomic.AtomicLong,
             acknowledged: java.util.concurrent.atomic.AtomicLong,
-            state: WorkerState,
+            uploadSizing: UploadRequestSizing,
             remainingNanos: Long,
-        ) -> Unit,
+        ) -> Boolean,
     ): Phase = kotlinx.coroutines.coroutineScope {
         val transfers = PhaseTransfers()
         val sent = java.util.concurrent.atomic.AtomicLong()
@@ -1459,10 +1455,10 @@ private object SpeedEngine {
         val successfulRequests = java.util.concurrent.atomic.AtomicLong()
         fun launchWorker(n: Int) = workers.add(launch(Dispatchers.IO) {
                 var retries = 0
-                val state = WorkerState()
+                val uploadSizing = UploadRequestSizing()
                 while (!transfers.stopped) {
                     try {
-                        transfer(transfers, sent, acknowledged, state, phaseDeadline.get() - System.nanoTime())
+                        if (!transfer(transfers, sent, acknowledged, uploadSizing, phaseDeadline.get() - System.nanoTime())) continue
                         if (!transfers.stopped) successfulRequests.incrementAndGet()
                         retries = 0
                     } catch (e: Exception) {
@@ -1702,16 +1698,17 @@ private object SpeedEngine {
                     }
                 }
             }
+            true
         }
         launch(Dispatchers.Main.immediate) { onPhaseFinished(false, down.mbps) }
         onLog("DOWNLOAD: bytes=${down.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, down.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, down.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, down.averageMbps) + " Mbps")
 
         publishProgress("Uploading · Ookla server", .55f, 0f, null)
         val payload = ByteArray(TransferTuning.MAX_UPLOAD_BYTES).also { java.security.SecureRandom().nextBytes(it) }
-        val up = runPhase("Uploading · Ookla server", .55f, .95f, probeAddress, true, publishProgress, onLog) { transfers, counter, accepted, state, remainingNanos ->
+        val up = runPhase("Uploading · Ookla server", .55f, .95f, probeAddress, true, publishProgress, onLog) { transfers, counter, accepted, sizing, remainingNanos ->
             val nonce = java.util.UUID.randomUUID().toString()
             val requestUrl = java.net.URI(uploadUri.scheme, uploadUri.userInfo, uploadUri.host, uploadUri.port, uploadUri.path, "nocache=$nonce", null).toString()
-            val requestBytes = TransferTuning.uploadBytesForRemaining(state.uploadBytes, remainingNanos)
+            val requestBytes = sizing.requestBytes(remainingNanos)
             val requestStart = System.nanoTime()
             val body = object : okhttp3.RequestBody() {
                 override fun contentType() = "application/octet-stream".toMediaType()
@@ -1729,13 +1726,18 @@ private object SpeedEngine {
                 }
             }
             val call = client.newCall(Request.Builder().url(requestUrl).post(body).header("Cache-Control", "no-cache").header("User-Agent", "SpeedTester-Android/1.0").build())
+            var requestAccepted = false
             transfers.run(cancel = call::cancel) {
-                call.execute().use {
-                    if (!it.isSuccessful) error("Ookla upload endpoint returned HTTP " + it.code)
-                    accepted.addAndGet(requestBytes.toLong())
-                    state.uploadBytes = TransferTuning.nextUploadBytes(requestBytes, System.nanoTime() - requestStart)
+                call.execute().use { response ->
+                    requestAccepted = sizing.onResponse(response.code, requestBytes, System.nanoTime() - requestStart)
+                    if (requestAccepted) {
+                        accepted.addAndGet(requestBytes.toLong())
+                    } else {
+                        onLog("Upload endpoint rejected $requestBytes bytes (HTTP 413); retrying with a smaller request")
+                    }
                 }
             }
+            requestAccepted
         }
         launch(Dispatchers.Main.immediate) { onPhaseFinished(true, up.mbps) }
         onLog("UPLOAD: bytes=${up.bytes}, elapsed=" + "%.2f".format(java.util.Locale.US, up.seconds) + "s, after ramp-up=" + "%.2f".format(java.util.Locale.US, up.mbps) + " Mbps, whole phase=" + "%.2f".format(java.util.Locale.US, up.averageMbps) + " Mbps")
