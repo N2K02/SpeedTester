@@ -37,4 +37,27 @@ class SpeedometerScaleTest {
         assertTrue(SpeedometerScale.angleFor(100f) > SpeedometerScale.angleFor(20f))
         assertEquals(150f, SpeedometerScale.angleFor(0f), 0f)
     }
+
+    @Test fun majorTicksLabelsAndNeedleAgreeOnEveryMark() {
+        val ticks = SpeedometerScale.ticks
+        val major = ticks.filter { it.major }
+        assertEquals(SpeedometerScale.marks.size, major.size)
+        assertTrue(ticks.zipWithNext().all { (left, right) -> left.degrees < right.degrees })
+        SpeedometerScale.marks.forEachIndexed { index, speed ->
+            assertEquals(major[index].degrees, SpeedometerScale.markAngle(index), 0.001f)
+            assertEquals(major[index].degrees, SpeedometerScale.angleFor(speed), 0.001f)
+        }
+    }
+
+    @Test fun needleAndReadoutReturnToZeroWhenTheTestFinishes() {
+        val display = SpeedometerDisplay.select(false, true, 36.1f, 37f)
+        assertEquals(SpeedometerDisplay(0f, 0f, false), display)
+        assertEquals(SpeedometerScale.START_DEGREES, SpeedometerScale.angleFor(display.needleMbps), 0f)
+    }
+
+    @Test fun liveDialPreservesNeedleAndReadoutIndependently() {
+        assertEquals(SpeedometerDisplay(0f, 0f, false), SpeedometerDisplay.select(true, false, 0f, 0f))
+        assertEquals(SpeedometerDisplay(110f, 112f, false), SpeedometerDisplay.select(true, false, 110f, 112f))
+        assertEquals(SpeedometerDisplay(34f, 37f, true), SpeedometerDisplay.select(true, true, 34f, 37f))
+    }
 }

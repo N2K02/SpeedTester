@@ -1,17 +1,9 @@
 package com.speedtester.app
 
-/**
- * Turns payload byte counts into the headline speed reported by mainstream testers.
- *
- * - Line rate: payload bytes exclude HTTP/TCP/IP/Ethernet headers. LibreSpeed compensates with
- *   1048576/925000 (only ~925000 of every MiB on the wire is payload); Ookla-style results are
- *   comparable to this line rate rather than raw payload.
- * - Trimmed rate: like Ookla/Cloudflare, transient Wi-Fi dips should not drag the result down.
- *   Rates over sliding 1 s windows are sorted, the slowest 30 % and fastest 10 % dropped and the
- *   rest averaged.
+/** Decimal Mbps from observed payload bytes. No assumed network-overhead multiplier.
+ * A trimmed rate is diagnostic only; the headline uses the full post-warmup window.
  */
 internal object ThroughputReport {
-    const val OVERHEAD_FACTOR = 1_048_576.0 / 925_000.0
     const val WINDOW_NANOS = 1_000_000_000L
     const val DROP_SLOWEST = 0.30
     const val DROP_FASTEST = 0.10
@@ -19,8 +11,27 @@ internal object ThroughputReport {
 
     data class Point(val nanos: Long, val bytes: Long)
 
-    fun lineRate(payloadMbps: Double): Double =
-        if (!payloadMbps.isFinite() || payloadMbps <= 0.0) 0.0 else payloadMbps * OVERHEAD_FACTOR
+    fun payloadRate(payloadMbps: Double): Double =
+        if (!payloadMbps.isFinite() || payloadMbps <= 0.0) 0.0 else payloadMbps
+
+    fun measuredMbps(bytes: Long, nanos: Long): Double =
+        if (bytes <= 0 || nanos <= 0) 0.0 else bytes * 8_000.0 / nanos
+
+    /** Compare four independent one-second buckets, not overlapping samples. */
+    fun stable(points: List<Point>): Boolean {
+        if (points.size < 2) return false
+        val rates = mutableListOf<Double>()
+        var end = points.lastIndex
+        repeat(4) {
+            var start = end - 1
+            while (start >= 0 && points[end].nanos - points[start].nanos < WINDOW_NANOS) start--
+            if (start < 0) return false
+            rates.add(measuredMbps(points[end].bytes - points[start].bytes, points[end].nanos - points[start].nanos))
+            end = start
+        }
+        val mean = rates.average()
+        return mean > 0.0 && rates.all { kotlin.math.abs(it - mean) <= mean * 0.20 }
+    }
 
     /** Rates (payload Mbps) of every sliding window of at least [WINDOW_NANOS]. */
     fun windowRates(points: List<Point>, windowNanos: Long = WINDOW_NANOS): List<Double> {
@@ -36,6 +47,10 @@ internal object ThroughputReport {
         }
         return rates
     }
+
+    /** Peak is a sustained one-second rate, not a burst of batched acknowledgements. */
+    fun sustainedPeak(points: List<Point>, fallback: Double): Double =
+        windowRates(points).maxOrNull() ?: payloadRate(fallback)
 
     /** Trimmed mean of sliding-window rates, or null when too few windows exist to trim fairly. */
     fun trimmedMbps(points: List<Point>, windowNanos: Long = WINDOW_NANOS): Double? {

@@ -11,14 +11,16 @@ class SpeedEngineRegressionTest {
         assertEquals(2_097_152L, TransferAccounting.countableBytes(2_097_152L, 0L, false))
     }
 
-    @Test fun originalThroughputAndUploadRequestSizingStayRestored() {
+    @Test fun measuredThroughputAndAdaptiveUploadSizing() {
         val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
         val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
         assertTrue(engine.contains("TransferAccounting.countableBytes(movedBytes, acknowledged.get(), verifyUpload)"))
         assertTrue(engine.contains("warmupBytes = total"))
-        assertTrue(engine.contains("peak = maxOf(peak, instant)"))
-        assertTrue(engine.contains("ByteArray(256 * 1024)"))
-        assertTrue(engine.contains("accepted.addAndGet(payload.size.toLong())"))
+        assertTrue(engine.contains("ThroughputReport.sustainedPeak(windowPoints"))
+        assertTrue(engine.contains("confirmedRate.sample(now, total)"))
+        assertTrue(engine.contains("MeasurementReliability.replacementCount(workers.size, targetStreams, launched, maxLaunches)"))
+        assertTrue(engine.contains("ByteArray(TransferTuning.MAX_UPLOAD_BYTES)"))
+        assertTrue(engine.contains("accepted.addAndGet(requestBytes.toLong())"))
         assertFalse(engine.contains("ThroughputSamples("))
         assertFalse(engine.contains("UploadRequestSizing.choose("))
     }
