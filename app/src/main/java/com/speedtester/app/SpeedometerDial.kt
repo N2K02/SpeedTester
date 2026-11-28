@@ -41,7 +41,8 @@ internal fun SpeedometerDial(
     speedMbps: Float,
     isUpload: Boolean,
     needleSpeedMbps: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    descriptionPrefix: String? = null
 ) {
     val safeSpeed = SpeedometerScale.sanitize(speedMbps)
     val animatedAngle = animateFloatAsState(
@@ -59,7 +60,7 @@ internal fun SpeedometerDial(
             .fillMaxWidth()
             .height(268.dp)
             .semantics {
-                contentDescription = (if (isUpload) "Upload " else "Download ") +
+                contentDescription = (descriptionPrefix ?: if (isUpload) "Upload " else "Download ") +
                     String.format(Locale.US, "%.1f megabits per second", safeSpeed)
             }
             .drawWithCache {
@@ -72,10 +73,8 @@ internal fun SpeedometerDial(
                 val progressBrush = Brush.sweepGradient(listOf(dialBlue, dialCyan, dialPurple, dialBlue), center)
 
                 val tickOuter = radius - 24.dp.toPx()
-                val ticks = (0..48).map { index ->
-                    val degrees = SpeedometerScale.START_DEGREES + index * 5f
+                val ticks = SpeedometerScale.ticks.map { (degrees, isMajor) ->
                     val radians = Math.toRadians(degrees.toDouble())
-                    val isMajor = index % 6 == 0
                     val tickInner = tickOuter - (if (isMajor) 11.dp.toPx() else 5.dp.toPx())
                     DialTick(
                         degrees = degrees,
@@ -97,8 +96,7 @@ internal fun SpeedometerDial(
                     isFakeBoldText = true
                 }
                 val labels = SpeedometerScale.marks.mapIndexed { index, mark ->
-                    val degrees = SpeedometerScale.START_DEGREES +
-                        SpeedometerScale.dialFractions[index] * SpeedometerScale.SWEEP_DEGREES
+                    val degrees = SpeedometerScale.markAngle(index)
                     val position = dialPoint(center, radius - 48.dp.toPx(), Math.toRadians(degrees.toDouble()))
                     DialLabel(String.format(Locale.US, "%.0f", mark), position + Offset(0f, 4.dp.toPx()))
                 }

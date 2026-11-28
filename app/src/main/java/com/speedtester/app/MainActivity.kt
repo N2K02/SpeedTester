@@ -451,13 +451,19 @@ private fun SpeedTesterApp(context: Context) {
                                 verticalArrangement = Arrangement.spacedBy(7.dp)) {
                                 Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.labelMedium)
-                                // Only live transfers move the gauge; completed speeds remain in the result cards.
-                                val gaugeSpeed = if (testing) {
-                                    if (gaugeUpload) liveUploadMbps else liveDownloadMbps
-                                } else 0f
+                                val lastFinished = history.firstOrNull()
+                                val gauge = SpeedometerDisplay.select(
+                                    testing = testing,
+                                    liveIsUpload = gaugeUpload,
+                                    liveReadoutMbps = if (gaugeUpload) liveUploadMbps else liveDownloadMbps,
+                                    liveNeedleMbps = gaugeLiveMbps,
+                                    lastSavedUploadMbps = lastFinished?.upload
+                                )
                                 SpeedometerDial(
-                                    gaugeSpeed, gaugeUpload,
-                                    needleSpeedMbps = if (testing) gaugeLiveMbps else 0f
+                                    speedMbps = gauge.readoutMbps,
+                                    isUpload = gauge.isUpload,
+                                    needleSpeedMbps = gauge.needleMbps,
+                                    descriptionPrefix = if (gauge.showingSavedUpload) "Last saved upload " else null
                                 )
                                 if (testing && gaugeUpload) {
                                     Text(
@@ -465,8 +471,13 @@ private fun SpeedTesterApp(context: Context) {
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                } else if (gauge.showingSavedUpload) {
+                                    Text(
+                                        "Last saved upload · ${SpeedRatePresentation.format(lastFinished?.upload)} Mbps",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                                val lastFinished = history.firstOrNull()
                                 SpeedRateCards(
                                     download = SpeedRatePresentation.shown(
                                         testing, downloadPhaseMbps, liveDownloadMbps,
@@ -525,7 +536,6 @@ private fun SpeedTesterApp(context: Context) {
                                             true
                                         }.getOrDefault(false)
                                         val testJob = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-                                            var resultSaved = false
                                             try {
                                                 val testNetworkAtStart = withContext(Dispatchers.IO) { readNetworkInfo(context) }
                                                 var candidate = chosenServerAtStart
@@ -620,7 +630,6 @@ private fun SpeedTesterApp(context: Context) {
                                                     status = "Test complete — history not saved"
                                                     return@launch
                                                 }
-                                                resultSaved = true
  logDiagnostic("RESULT download=" + "%.2f".format(java.util.Locale.US, download) + " Mbps, upload=" + "%.2f".format(java.util.Locale.US, upload) + " Mbps, idlePing=" + ping + " ms, jitter=" + "%.2f".format(java.util.Locale.US, jitter) + " ms"); logDiagnostic("Stability: loadedPing=" + loadedPing + " ms, loadedJitter=" + "%.2f".format(java.util.Locale.US, loadedJitter) + " ms, failedProbes=" + failedProbes + "/" + probeCount); logDiagnostic("========== SPEED TEST SUCCESS =========="); status = "Test complete"; activityLog.add("Test completed successfully"); activityLog.add("Download: " + String.format(java.util.Locale.US, "%.1f Mbps", download) + " · Upload: " + String.format(java.util.Locale.US, "%.1f Mbps", upload)); activityLog.add("Loaded TCP ping: " + (if (loadedPing >= 0) "$loadedPing ms" else "unavailable") + " · failed probes $failedProbes/$probeCount"); while (activityLog.size > 8) activityLog.removeAt(0)
                                             } catch (e: CancellationException) {
                                                 if (networkCancellation.hasChanged()) {
@@ -633,7 +642,6 @@ private fun SpeedTesterApp(context: Context) {
                                             } catch (e: Exception) { if (serverDiscoveryStatus == "Discovering…") serverDiscoveryStatus = "Failed"; logDiagnostic("FATAL " + e.javaClass.name + ": " + (e.message ?: "Test failed")); e.cause?.let { logDiagnostic("CAUSE " + it.javaClass.name + ": " + (it.message ?: "no message")) }; e.stackTrace.take(8).forEach { logDiagnostic("  at " + it.toString()) }; error = e.message ?: "Test failed"; status = "Test failed"; activityLog.add("ERROR: " + (e.message ?: "Test failed")); while (activityLog.size > 8) activityLog.removeAt(0) }
                                             finally {
                                                 if (watchingNetwork) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
-                                                if (!resultSaved) gaugeUpload = false
                                                 testing = false
                                                 progress = 1f
                                             }
