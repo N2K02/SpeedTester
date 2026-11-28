@@ -14,11 +14,22 @@ class ThroughputReportTest {
             ThroughputReport.Point(t, (mbps * 1_000_000 / 8 * t / 1_000_000_000.0).toLong())
         }
 
-    @Test fun lineRateUsesLibreSpeedOverheadFactor() {
-        assertEquals(1.13359, ThroughputReport.OVERHEAD_FACTOR, 0.0001)
-        assertEquals(98.62, ThroughputReport.lineRate(87.0), 0.01)
-        assertEquals(0.0, ThroughputReport.lineRate(-1.0), 0.0)
-        assertEquals(0.0, ThroughputReport.lineRate(Double.NaN), 0.0)
+    @Test fun measuredPayloadIsNotInflated() {
+        assertEquals(87.0, ThroughputReport.payloadRate(87.0), 0.0)
+        assertEquals(0.0, ThroughputReport.payloadRate(-1.0), 0.0)
+        assertEquals(0.0, ThroughputReport.payloadRate(Double.NaN), 0.0)
+        for (rate in listOf(10.0, 30.0, 50.0, 100.0, 300.0, 500.0, 1000.0)) {
+            assertEquals(rate, ThroughputReport.measuredMbps((rate * 125_000).toLong(), 1_000_000_000L), 0.0001)
+        }
+        assertEquals(0.0, ThroughputReport.measuredMbps(1000, 0), 0.0)
+    }
+
+    @Test fun stabilityNeedsFourIndependentWindows() {
+        assertFalse(ThroughputReport.stable(steady(100.0, 3)))
+        assertTrue(ThroughputReport.stable(steady(100.0, 8)))
+        assertFalse(ThroughputReport.stable(steady(0.0, 8)))
+        val uneven = steady(100.0, 8).map { if (it.nanos >= 7_000_000_000L) it.copy(bytes = 87_500_000L) else it }
+        assertFalse(ThroughputReport.stable(uneven))
     }
 
     @Test fun constantRateIsUnchangedByTrimming() {
@@ -68,11 +79,11 @@ class ThroughputReportTest {
         assertTrue(lines[1].endsWith(",87.0,34.5"))
     }
 
-    @Test fun engineReportsTrimmedLineRateAndKeepsClassicDataRate() {
+    @Test fun engineReportsMeasuredPayloadAndKeepsDiagnosticTrim() {
         val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
         val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
         assertTrue(engine.contains("ThroughputReport.trimmedMbps(windowPoints) ?: steady"))
-        assertTrue(engine.contains("val headline = ThroughputReport.lineRate(trimmed)"))
+        assertTrue(engine.contains("val headline = ThroughputReport.payloadRate(steady)"))
         assertTrue(engine.contains("samples, probeFailures.get(), probeAttempts.get(), steady)"))
         assertTrue(engine.contains("down.dataMbps, up.dataMbps)"))
     }

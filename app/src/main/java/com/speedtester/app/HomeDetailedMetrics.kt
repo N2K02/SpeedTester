@@ -97,8 +97,8 @@ private fun SpeedMetricTile(
             Text("Peak  " + HomeMetricsFormatting.speed(peak) + " Mbps",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface)
-            // Payload only (no protocol overhead): what a large file download actually achieves.
-            if (data != null) Text("Data throughput  " + HomeMetricsFormatting.speed(data) + " Mbps",
+            // Retain the historical payload field without implying a wire-rate estimate.
+            if (data != null) Text("Sustained payload  " + HomeMetricsFormatting.speed(data) + " Mbps",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
