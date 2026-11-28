@@ -39,25 +39,20 @@ internal object SpeedometerScale {
 }
 
 
-/** Live transfers drive the dial; idle results use the same saved upload as the cards. */
+/** The idle dial resets to zero; the separate result cards keep saved results. */
 internal data class SpeedometerDisplay(
     val readoutMbps: Float,
     val needleMbps: Float,
-    val isUpload: Boolean,
-    val showingSavedUpload: Boolean = false
+    val isUpload: Boolean
 ) {
     companion object {
         fun select(
             testing: Boolean,
             liveIsUpload: Boolean,
             liveReadoutMbps: Float,
-            liveNeedleMbps: Float,
-            lastSavedUploadMbps: Double?
-        ): SpeedometerDisplay {
-            if (testing) return SpeedometerDisplay(liveReadoutMbps, liveNeedleMbps, liveIsUpload)
-            val saved = lastSavedUploadMbps?.toFloat()
-            if (saved == null || !saved.isFinite() || saved < 0f) return SpeedometerDisplay(0f, 0f, false)
-            return SpeedometerDisplay(saved, saved, isUpload = true, showingSavedUpload = true)
-        }
+            liveNeedleMbps: Float
+        ): SpeedometerDisplay =
+            if (testing) SpeedometerDisplay(liveReadoutMbps, liveNeedleMbps, liveIsUpload)
+            else SpeedometerDisplay(0f, 0f, false)
     }
 }

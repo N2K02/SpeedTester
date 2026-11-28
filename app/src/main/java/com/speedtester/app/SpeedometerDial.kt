@@ -41,8 +41,7 @@ internal fun SpeedometerDial(
     speedMbps: Float,
     isUpload: Boolean,
     needleSpeedMbps: Float,
-    modifier: Modifier = Modifier,
-    descriptionPrefix: String? = null
+    modifier: Modifier = Modifier
 ) {
     val safeSpeed = SpeedometerScale.sanitize(speedMbps)
     val animatedAngle = animateFloatAsState(
@@ -60,7 +59,7 @@ internal fun SpeedometerDial(
             .fillMaxWidth()
             .height(268.dp)
             .semantics {
-                contentDescription = (descriptionPrefix ?: if (isUpload) "Upload " else "Download ") +
+                contentDescription = (if (isUpload) "Upload " else "Download ") +
                     String.format(Locale.US, "%.1f megabits per second", safeSpeed)
             }
             .drawWithCache {

@@ -456,24 +456,16 @@ private fun SpeedTesterApp(context: Context) {
                                     testing = testing,
                                     liveIsUpload = gaugeUpload,
                                     liveReadoutMbps = if (gaugeUpload) liveUploadMbps else liveDownloadMbps,
-                                    liveNeedleMbps = gaugeLiveMbps,
-                                    lastSavedUploadMbps = lastFinished?.upload
+                                    liveNeedleMbps = gaugeLiveMbps
                                 )
                                 SpeedometerDial(
                                     speedMbps = gauge.readoutMbps,
                                     isUpload = gauge.isUpload,
-                                    needleSpeedMbps = gauge.needleMbps,
-                                    descriptionPrefix = if (gauge.showingSavedUpload) "Last saved upload " else null
+                                    needleSpeedMbps = gauge.needleMbps
                                 )
                                 if (testing && gaugeUpload) {
                                     Text(
                                         "Needle: outgoing transfer estimate · Live rate: server-confirmed uploads",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                } else if (gauge.showingSavedUpload) {
-                                    Text(
-                                        "Last saved upload · ${SpeedRatePresentation.format(lastFinished?.upload)} Mbps",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

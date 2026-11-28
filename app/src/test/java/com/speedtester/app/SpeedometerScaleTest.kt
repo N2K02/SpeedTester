@@ -49,23 +49,15 @@ class SpeedometerScaleTest {
         }
     }
 
-    @Test fun completedDialShowsSavedUploadInsteadOfResettingToZero() {
-        val display = SpeedometerDisplay.select(false, false, 0f, 0f, 36.1)
-        assertEquals(36.1f, display.readoutMbps, 0.001f)
-        assertEquals(display.readoutMbps, display.needleMbps, 0f)
-        assertTrue(display.isUpload)
-        assertTrue(display.showingSavedUpload)
+    @Test fun needleAndReadoutReturnToZeroWhenTheTestFinishes() {
+        val display = SpeedometerDisplay.select(false, true, 36.1f, 37f)
+        assertEquals(SpeedometerDisplay(0f, 0f, false), display)
+        assertEquals(SpeedometerScale.START_DEGREES, SpeedometerScale.angleFor(display.needleMbps), 0f)
     }
 
-    @Test fun liveDialIgnoresSavedResultAndPreservesNeedleAndReadoutIndependently() {
-        assertEquals(SpeedometerDisplay(0f, 0f, false), SpeedometerDisplay.select(true, false, 0f, 0f, 36.1))
-        assertEquals(SpeedometerDisplay(110f, 112f, false), SpeedometerDisplay.select(true, false, 110f, 112f, 36.1))
-        assertEquals(SpeedometerDisplay(34f, 37f, true), SpeedometerDisplay.select(true, true, 34f, 37f, 36.1))
-    }
-
-    @Test fun idleDialDoesNotReuseUnverifiedLiveValuesWhenNoSavedResultExists() {
-        for (saved in listOf(null, Double.NaN, -1.0)) {
-            assertEquals(SpeedometerDisplay(0f, 0f, false), SpeedometerDisplay.select(false, true, 90f, 99f, saved))
-        }
+    @Test fun liveDialPreservesNeedleAndReadoutIndependently() {
+        assertEquals(SpeedometerDisplay(0f, 0f, false), SpeedometerDisplay.select(true, false, 0f, 0f))
+        assertEquals(SpeedometerDisplay(110f, 112f, false), SpeedometerDisplay.select(true, false, 110f, 112f))
+        assertEquals(SpeedometerDisplay(34f, 37f, true), SpeedometerDisplay.select(true, true, 34f, 37f))
     }
 }
