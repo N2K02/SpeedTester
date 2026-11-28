@@ -1346,6 +1346,14 @@ private object SpeedEngine {
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .build()
 
+    private fun transferUri(server: NdtServerCandidate): java.net.URI {
+        val raw = java.net.URI(server.uploadUrl)
+        val host = server.serverId.takeIf { it.matches(Regex("\\d+")) }
+            ?.let { "server-$it.prod.hosts.ooklaserver.net" }
+            ?: raw.host ?: error("The selected Ookla server URL is invalid")
+        return java.net.URI(raw.scheme, raw.userInfo, host, raw.port, raw.path, raw.query, raw.fragment)
+    }
+
     suspend fun discoverCandidates(): List<NdtServerCandidate> = withContext(Dispatchers.IO) {
         // Search terms improve coverage, but the local country-code check is authoritative.
         val searches = listOf("Mauritius", "my.t", "Mauritius Telecom", "Emtel", "CHiLi", "4342", "18685", "30612")
@@ -1399,13 +1407,18 @@ private object SpeedEngine {
             found.values.map { candidate ->
                 async {
                     probeSlots.withPermit {
-                    val hostPort = candidate.host
-                    val host = hostPort.substringBeforeLast(":", hostPort)
-                    val port = hostPort.substringAfterLast(":", "").toIntOrNull() ?: 443
                     val latency = runCatching {
-                        val started = System.nanoTime()
-                        Socket().use { it.connect(java.net.InetSocketAddress(host, port), 1800) }
-                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                        val uri = transferUri(candidate)
+                        val address = java.net.InetSocketAddress(uri.host, if (uri.port > 0) uri.port else 443)
+                        val probes = mutableListOf<Long>()
+                        repeat(3) {
+                            runCatching {
+                                val started = System.nanoTime()
+                                Socket().use { it.connect(address, 900) }
+                                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                            }.getOrNull()?.let { probes.add(it) }
+                        }
+                        MeasurementReliability.discoveryPingMs(probes)
                     }.getOrNull()
                     candidate.copy(latencyMs = latency)
                     }
@@ -1453,6 +1466,9 @@ private object SpeedEngine {
         val phaseDeadline = java.util.concurrent.atomic.AtomicLong(start + minimumDuration)
         val errors = java.util.concurrent.atomic.AtomicInteger()
         val successfulRequests = java.util.concurrent.atomic.AtomicLong()
+        var launched = 0
+        var targetStreams = STREAMS
+        val maxLaunches = StreamScaling.MAX + 4
         fun launchWorker(n: Int) = workers.add(launch(Dispatchers.IO) {
                 var retries = 0
                 val uploadSizing = UploadRequestSizing()
@@ -1472,7 +1488,10 @@ private object SpeedEngine {
                     }
                 }
             })
-        (1..STREAMS).forEach(::launchWorker)
+        fun addWorkers(count: Int) {
+            repeat(count) { launchWorker(++launched) }
+        }
+        addWorkers(STREAMS)
         val probeWorker = launch(Dispatchers.IO) {
             // Sample loaded latency across the whole phase, not only the ramp-up.
             while (!transfers.stopped) {
@@ -1497,12 +1516,12 @@ private object SpeedEngine {
         }
         try {
             val gaugeRate = GaugeTransferRate(start)
+            val confirmedRate = GaugeTransferRate(start, 1_500_000_000L)
             var lastAt = start
             var lastBytes = 0L
             var lastMovedBytes = 0L
             var unacknowledgedIntervals = 0
             var longestSampleNanos = 0L
-            var peak = 0.0
             var warmupBytes = -1L
             var warmupAt = 0L
             var scalingSettled = false
@@ -1517,25 +1536,28 @@ private object SpeedEngine {
                 val now = System.nanoTime()
                 val movedBytes = sent.get()
                 val total = TransferAccounting.countableBytes(movedBytes, acknowledged.get(), verifyUpload)
-                val interval = ((now - lastAt) / 1_000_000_000.0).coerceAtLeast(.001)
-                val instant = (total - lastBytes).coerceAtLeast(0L) * 8.0 / interval / 1_000_000.0
                 val needleMbps = gaugeRate.sample(now, movedBytes)
+                val liveMbps = confirmedRate.sample(now, total)
                 if (verifyUpload && total == lastBytes && movedBytes > lastMovedBytes) unacknowledgedIntervals++
                 longestSampleNanos = maxOf(longestSampleNanos, now - lastAt)
                 val elapsedMs = TimeUnit.NANOSECONDS.toMillis(now - start)
                 if (!scalingSettled && now - lastCheckAt >= TimeUnit.MILLISECONDS.toNanos(StreamScaling.CHECK_INTERVAL_MS)) {
                     // Bytes moved (not lumpy upload acknowledgements) show whether more streams help.
                     val checkMbps = (movedBytes - lastCheckMoved).coerceAtLeast(0L) * 8_000.0 / (now - lastCheckAt)
-                    val add = StreamScaling.streamsToAdd(workers.size, elapsedMs, previousCheckMbps, checkMbps, verifyUpload)
-                    plateauIntervals = if (add == 0 && checkMbps > 0.0) plateauIntervals + 1 else 0
-                    if (add > 0) {
-                        val first = workers.size + 1
-                        (first until first + add).forEach(::launchWorker)
-                        onLog("$label: " + workers.size + " parallel connections (exploration rate: " +
-                            "%.1f".format(java.util.Locale.US, checkMbps) + " Mbps)")
-                    } else if (StreamScaling.settled(workers.size, elapsedMs, checkMbps, add, plateauIntervals)) {
+                    workers.removeAll { it.isCompleted }
+                    val add = StreamScaling.streamsToAdd(targetStreams, elapsedMs, previousCheckMbps, checkMbps, verifyUpload)
+                    targetStreams += add
+                    val replacements = if (elapsedMs < StreamScaling.SCALING_DEADLINE_MS)
+                        MeasurementReliability.replacementCount(workers.size, targetStreams, launched, maxLaunches)
+                        else 0
+                    addWorkers(replacements)
+                    plateauIntervals = if (replacements == 0 && checkMbps > 0.0) plateauIntervals + 1 else 0
+                    if (replacements > 0) {
+                        onLog("$label: ${workers.size}/$targetStreams active streams, total launched=$launched, exploration rate=" +
+                            "%.1f".format(java.util.Locale.US, checkMbps) + " Mbps")
+                    } else if (StreamScaling.settled(targetStreams, elapsedMs, checkMbps, add, plateauIntervals)) {
                         scalingSettled = true
-                        onLog("$label: settled at " + workers.count { !it.isCompleted } + "/" + workers.size + " active connections after " + elapsedMs + " ms")
+                        onLog("$label: settled at ${workers.size}/$targetStreams active connections after $elapsedMs ms")
                     }
                     if (checkMbps > 0.0) previousCheckMbps = checkMbps
                     lastCheckAt = now
@@ -1546,18 +1568,17 @@ private object SpeedEngine {
                     warmupBytes = total
                     warmupAt = now
                 }
-                peak = maxOf(peak, instant)
                 if (warmupBytes >= 0L) windowPoints.add(ThroughputReport.Point(now, total))
                 val fraction = ((now - start).toDouble() / duration).toFloat().coerceIn(0f, 1f)
-                onUpdate(label, from + (to - from) * fraction, ThroughputReport.payloadRate(instant).toFloat(),
+                onUpdate(label, from + (to - from) * fraction, ThroughputReport.payloadRate(liveMbps.toDouble()).toFloat(),
                     ThroughputReport.payloadRate(needleMbps.toDouble()).toFloat())
                 lastAt = now
                 lastBytes = total
                 lastMovedBytes = movedBytes
                 // If every stream exhausted retries, a partial phase is not a valid speed test.
-                if (MeasurementReliability.allWorkersFailed(
+                if ((workers.isEmpty() || MeasurementReliability.allWorkersFailed(
                         workers.count { it.isCompleted }, workers.size, transfers.stopped
-                    )) {
+                    )) && (scalingSettled || elapsedMs >= StreamScaling.SCALING_DEADLINE_MS || launched >= maxLaunches)) {
                     error("$label: all transfer streams failed before the test finished; " +
                         (failures.get()?.message ?: "retry on another server"))
                 }
@@ -1573,7 +1594,8 @@ private object SpeedEngine {
             // Freeze the final sampled bytes and time together before cancellation/cleanup.
             val end = lastAt
             val total = lastBytes
-            val failedWorkers = workers.count { it.isCompleted }
+            val failedWorkers = (targetStreams - workers.count { !it.isCompleted }).coerceAtLeast(0)
+            val sustainedPeak = ThroughputReport.sustainedPeak(windowPoints, fallback = 0.0)
             transfers.stop()
             workers.forEach { it.cancel() }
             probeWorker.cancelAndJoin()
@@ -1595,8 +1617,8 @@ private object SpeedEngine {
                 ThroughputReport.measuredMbps(total - warmupBytes, end - warmupAt)
                 else average
             if (steady <= 0.0) error("$label: no confirmed throughput after warmup")
-            if (failedWorkers * 2 >= workers.size) error("$label: too many transfer streams failed")
-            onLog("$label requests: completed=${successfulRequests.get()}, errors=${errors.get()}, failed workers=$failedWorkers/${workers.size}, measured bytes=$total")
+            if (failedWorkers * 2 >= targetStreams) error("$label: too many transfer streams failed")
+            onLog("$label requests: completed=${successfulRequests.get()}, errors=${errors.get()}, missing workers=$failedWorkers/$targetStreams, launched=$launched, measured bytes=$total")
             if (failedWorkers > 0 || errors.get() > 0) onLog("$label warning: some transfer requests failed")
             if (!ThroughputReport.stable(windowPoints)) onLog("$label warning: throughput remained variable")
             val samples = synchronized(latency) { latency.toList() }
@@ -1609,7 +1631,7 @@ private object SpeedEngine {
                 " Mbps, trimmed " + "%.2f".format(java.util.Locale.US, trimmed) +
                 " Mbps, measured headline " +
                 "%.2f".format(java.util.Locale.US, headline) + " Mbps")
-            Phase(headline, ThroughputReport.payloadRate(average), ThroughputReport.payloadRate(maxOf(peak, trimmed)), total, seconds,
+            Phase(headline, ThroughputReport.payloadRate(average), ThroughputReport.payloadRate(maxOf(sustainedPeak, steady)), total, seconds,
                 samples, probeFailures.get(), probeAttempts.get(), steady)
         } finally {
             transfers.stop()
@@ -1624,18 +1646,8 @@ private object SpeedEngine {
             launch(Dispatchers.Main.immediate) { onUpdate(phase, progress, rate, needleRate) }
         }
         val server = selectedServer ?: error("Select a Mauritius Ookla-compatible server first")
-        val rawUploadUri = java.net.URI(server.uploadUrl)
-        // Ookla-hosted servers can advertise a provider alias whose TLS certificate is issued
-        // for the canonical server-ID hostname. Use that certificate-valid hostname; never
-        // disable certificate or hostname verification.
-        val certificateHost = server.serverId.takeIf { it.matches(Regex("\\d+")) }
-            ?.let { "server-$it.prod.hosts.ooklaserver.net" }
-            ?: rawUploadUri.host
-            ?: error("The selected Ookla server URL is invalid")
-        val uploadUri = java.net.URI(
-            rawUploadUri.scheme, rawUploadUri.userInfo, certificateHost, rawUploadUri.port,
-            rawUploadUri.path, rawUploadUri.query, rawUploadUri.fragment
-        )
+        // Discovery and transfer use the same certificate-valid hostname and port.
+        val uploadUri = transferUri(server)
         val uploadEndpoint = uploadUri.toString()
         val host = uploadUri.host ?: error("The selected Ookla server URL is invalid")
         val port = if (uploadUri.port > 0) uploadUri.port else 443
@@ -1690,11 +1702,14 @@ private object SpeedEngine {
                         error("Unexpected download payload; select another compatible server")
                     body.byteStream().use { input ->
                         val buffer = ByteArray(128 * 1024)
+                        var requestBytes = 0L
                         while (!transfers.stopped) {
                             val count = input.read(buffer)
                             if (count < 0) break
+                            requestBytes += count
                             counter.addAndGet(count.toLong())
                         }
+                        if (!transfers.stopped && requestBytes == 0L) error("Empty download payload")
                     }
                 }
             }

@@ -48,6 +48,10 @@ internal object ThroughputReport {
         return rates
     }
 
+    /** Peak is a sustained one-second rate, not a burst of batched acknowledgements. */
+    fun sustainedPeak(points: List<Point>, fallback: Double): Double =
+        windowRates(points).maxOrNull() ?: payloadRate(fallback)
+
     /** Trimmed mean of sliding-window rates, or null when too few windows exist to trim fairly. */
     fun trimmedMbps(points: List<Point>, windowNanos: Long = WINDOW_NANOS): Double? {
         val rates = windowRates(points, windowNanos).filter { it.isFinite() }.sorted()

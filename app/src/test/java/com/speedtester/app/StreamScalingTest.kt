@@ -41,7 +41,7 @@ class StreamScalingTest {
     @Test fun engineUsesAdaptiveStreamsAndFreezesSampleBeforeCleanup() {
         val root = listOf(File("app/src/main"), File("src/main")).first { it.isDirectory }
         val engine = File(root, "java/com/speedtester/app/MainActivity.kt").readText()
-        assertTrue(engine.contains("StreamScaling.streamsToAdd(workers.size"))
+        assertTrue(engine.contains("StreamScaling.streamsToAdd(targetStreams"))
         assertTrue(engine.contains("StreamScaling.warmupReached("))
         assertTrue(engine.contains("val end = lastAt"))
         assertTrue(engine.contains("val total = lastBytes"))
